@@ -1,2 +1,2 @@
 # memematch
-HKU-CDS NLP Course-Project(7607A,2025)
+Course Project | <HKU/CDS> <7607A> | Term: Autumn 2025 | Team: <Hachimi>
