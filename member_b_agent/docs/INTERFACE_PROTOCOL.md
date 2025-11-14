@@ -258,121 +258,392 @@ def generate_meme(text: str, template: str = "drake", options: dict = None):
 
 ## 3️⃣ 成员 D：前端集成接口
 
-### 导入 Agent 服务
+### 🌐 HTTP API 方式（推荐）
 
-```python
-from agent_service import MemeAgentService
+**适合：React、Vue、Next.js、原生 JavaScript 等所有 Web 前端**
 
-# 初始化（启用会话管理）
-agent = MemeAgentService(enable_session=True)
+#### 启动 API 服务
+
+```bash
+cd member_b_agent/api
+./start.sh
 ```
 
-### 单次查询
+服务地址：
+- **API：** http://localhost:8000
+- **文档：** http://localhost:8000/docs （Swagger UI）
 
-```python
-result = agent.query("我太累了")
+---
 
-# 返回格式
-{
-    "success": True,
-    "meme_path": "dataset/train/tired_001.jpg",
-    "explanation": "这张图完美表达了累到不想动的感觉~",
-    "source": "search",          # "search" 或 "generated"
-    "session_id": "uuid-string"  # 会话 ID
-}
+### 📡 核心 API 接口
+
+#### 1. 查询梗图（POST /api/query）
+
+**请求：**
+```javascript
+fetch('http://localhost:8000/api/query', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({
+    text: "我太累了",
+    session_id: null  // 可选，用于多轮对话
+  })
+})
 ```
 
-### 多轮对话
-
-```python
-# 第一轮
-result1 = agent.query("我太累了")
-session_id = result1["session_id"]
-
-# 第二轮（继续对话）
-result2 = agent.query("再来一张", session_id=session_id)
-
-# 第三轮
-result3 = agent.query("换个开心的", session_id=session_id)
-
-# 结束对话
-agent.clear_session(session_id)
-```
-
-### API 返回格式
-
-#### 成功响应
-
+**响应（成功）：**
 ```json
 {
-    "success": true,
-    "meme_path": "dataset/train/happy_001.jpg",
-    "explanation": "这张图完美表达了你的心情！",
-    "source": "search",
-    "session_id": "6d19d562-b793-4c87-a615-cceac0e43e4f",
-    "candidates": [...]
+  "success": true,
+  "meme_path": "dataset/train/tired_001.jpg",
+  "explanation": "这张图完美表达了累到不想动的感觉~",
+  "source": "search",
+  "session_id": "6d19d562-b793-4c87-a615-cceac0e43e4f"
 }
 ```
 
-#### 失败响应
-
+**响应（失败）：**
 ```json
 {
-    "success": false,
-    "error": "API 服务暂时不可用，请稍后重试",
-    "session_id": "6d19d562-b793-4c87-a615-cceac0e43e4f"
+  "success": false,
+  "error": "API 服务暂时不可用，请稍后重试",
+  "session_id": null
 }
 ```
 
-### Web API 封装（Flask）
+#### 2. 清除会话（DELETE /api/session/{id}）
 
-```python
-from flask import Flask, request, jsonify
-from agent_service import MemeAgentService
+```javascript
+fetch(`http://localhost:8000/api/session/${sessionId}`, {
+  method: 'DELETE'
+})
+```
 
-app = Flask(__name__)
-agent = MemeAgentService(enable_session=True)
+#### 3. 健康检查（GET /health）
 
-@app.route('/api/meme', methods=['POST'])
-def get_meme():
-    data = request.get_json()
-    user_input = data.get('text')
-    session_id = data.get('session_id')  # 可选
+```javascript
+fetch('http://localhost:8000/health')
+// 响应: {"status": "healthy", "version": "2.0.0"}
+```
+
+---
+
+### 💻 前端集成示例
+
+#### React 完整示例
+
+```jsx
+import { useState } from 'react';
+
+function MemeAgent() {
+  const [input, setInput] = useState('');
+  const [result, setResult] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const queryMeme = async () => {
+    setLoading(true);
+    setError(null);
     
-    result = agent.query(user_input, session_id=session_id)
-    return jsonify(result)
+    try {
+      const res = await fetch('http://localhost:8000/api/query', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          text: input,
+          session_id: sessionId
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        setResult(data);
+        setSessionId(data.session_id);  // 保存用于下次对话
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('网络请求失败');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-@app.route('/api/session/<session_id>', methods=['DELETE'])
-def clear_session(session_id):
-    success = agent.clear_session(session_id)
-    return jsonify({"success": success})
+  const clearChat = async () => {
+    if (sessionId) {
+      await fetch(`http://localhost:8000/api/session/${sessionId}`, {
+        method: 'DELETE'
+      });
+      setSessionId(null);
+      setResult(null);
+    }
+  };
+
+  return (
+    <div className="meme-agent">
+      <input 
+        value={input} 
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="输入你的情绪..."
+        disabled={loading}
+      />
+      
+      <button onClick={queryMeme} disabled={loading || !input}>
+        {loading ? '思考中...' : '找梗图'}
+      </button>
+      
+      {sessionId && (
+        <button onClick={clearChat}>新对话</button>
+      )}
+      
+      {error && <div className="error">{error}</div>}
+      
+      {result && (
+        <div className="result">
+          <img 
+            src={`http://localhost:8000/${result.meme_path}`} 
+            alt="meme"
+          />
+          <p>{result.explanation}</p>
+          <small>来源: {result.source}</small>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default MemeAgent;
 ```
 
-### 使用场景
+#### Vue 3 完整示例
 
-#### 场景 1: 单次查询（不需要上下文）
+```vue
+<template>
+  <div class="meme-agent">
+    <input 
+      v-model="input" 
+      placeholder="输入你的情绪..."
+      :disabled="loading"
+      @keyup.enter="queryMeme"
+    />
+    
+    <button @click="queryMeme" :disabled="loading || !input">
+      {{ loading ? '思考中...' : '找梗图' }}
+    </button>
+    
+    <button v-if="sessionId" @click="clearChat">新对话</button>
+    
+    <div v-if="error" class="error">{{ error }}</div>
+    
+    <div v-if="result" class="result">
+      <img :src="`http://localhost:8000/${result.meme_path}`" alt="meme" />
+      <p>{{ result.explanation }}</p>
+      <small>来源: {{ result.source }}</small>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue';
+
+const input = ref('');
+const result = ref(null);
+const sessionId = ref(null);
+const loading = ref(false);
+const error = ref(null);
+
+const queryMeme = async () => {
+  if (!input.value) return;
+  
+  loading.value = true;
+  error.value = null;
+  
+  try {
+    const res = await fetch('http://localhost:8000/api/query', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        text: input.value,
+        session_id: sessionId.value
+      })
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+      result.value = data;
+      sessionId.value = data.session_id;
+    } else {
+      error.value = data.error;
+    }
+  } catch (err) {
+    error.value = '网络请求失败';
+  } finally {
+    loading.value = false;
+  }
+};
+
+const clearChat = async () => {
+  if (sessionId.value) {
+    await fetch(`http://localhost:8000/api/session/${sessionId.value}`, {
+      method: 'DELETE'
+    });
+    sessionId.value = null;
+    result.value = null;
+  }
+};
+</script>
+```
+
+#### 原生 JavaScript
+
+```javascript
+class MemeAgentClient {
+  constructor(baseUrl = 'http://localhost:8000') {
+    this.baseUrl = baseUrl;
+    this.sessionId = null;
+  }
+
+  async query(text) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/query`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          text: text,
+          session_id: this.sessionId
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        this.sessionId = data.session_id;
+        return data;
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error) {
+      console.error('查询失败:', error);
+      throw error;
+    }
+  }
+
+  async clearSession() {
+    if (this.sessionId) {
+      await fetch(`${this.baseUrl}/api/session/${this.sessionId}`, {
+        method: 'DELETE'
+      });
+      this.sessionId = null;
+    }
+  }
+}
+
+// 使用示例
+const agent = new MemeAgentClient();
+
+document.getElementById('query-btn').onclick = async () => {
+  const input = document.getElementById('user-input').value;
+  
+  try {
+    const result = await agent.query(input);
+    
+    // 显示结果
+    document.getElementById('meme-img').src = 
+      `http://localhost:8000/${result.meme_path}`;
+    document.getElementById('explanation').textContent = 
+      result.explanation;
+  } catch (error) {
+    alert(`错误: ${error.message}`);
+  }
+};
+```
+
+---
+
+### 🔄 多轮对话示例
+
+```javascript
+// 保持会话 ID 实现连续对话
+let currentSessionId = null;
+
+async function chat(userInput) {
+  const response = await fetch('http://localhost:8000/api/query', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      text: userInput,
+      session_id: currentSessionId  // 传入之前的 session_id
+    })
+  });
+  
+  const data = await response.json();
+  currentSessionId = data.session_id;  // 保存新的 session_id
+  return data;
+}
+
+// 对话流程
+const result1 = await chat("我太累了");
+// Agent 返回累的梗图
+
+const result2 = await chat("再来一张");
+// Agent 记得上下文，返回另一张累的梗图
+
+const result3 = await chat("换个开心的");
+// Agent 知道要换主题了
+```
+
+---
+
+### 🛠️ 常见问题
+
+#### Q1: CORS 跨域问题？
+
+**A:** API 服务已配置允许跨域。如果仍有问题，检查 `api/api_server.py` 中的 CORS 配置：
 
 ```python
-agent = MemeAgentService(enable_session=False)
-result = agent.query("开心")
-# 每次都是独立查询
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # 改为你的前端地址
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 ```
 
-#### 场景 2: 连续对话（需要上下文）
+#### Q2: 图片如何显示？
 
-```python
-agent = MemeAgentService(enable_session=True)
-
-# 用户对话流程
-result1 = agent.query("我太累了")
-session_id = result1["session_id"]
-
-result2 = agent.query("再来一张", session_id=session_id)
-# Agent 知道之前说的是"我太累了"
-
-result3 = agent.query("换个开心的", session_id=session_id)
-# Agent 知道要换主题了
+**A:** 方式 1（推荐）- 直接使用返回的路径：
+```html
+<img src={`http://localhost:8000/${result.meme_path}`} />
 ```
+
+方式 2 - 配置静态文件服务（需要后端配置）
+
+#### Q3: 如何处理加载状态？
+
+**A:** 使用 loading 状态：
+```javascript
+const [loading, setLoading] = useState(false);
+
+const query = async () => {
+  setLoading(true);
+  try {
+    // API 调用
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+#### Q4: 需要部署到生产环境怎么办？
+
+**A:** 
+1. 修改 `baseUrl` 为生产环境地址
+2. 配置 CORS 为具体域名
+3. 使用 Nginx/Docker 部署后端服务
 
 ---
 
