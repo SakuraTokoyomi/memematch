@@ -247,13 +247,35 @@ class MemeAgent:
                     print('='*60)
                 
                 # 调用 LLM（带 Function Calling）
-                response = self.client.chat.completions.create(
-                    model=self.config.model,
-                    messages=messages,
-                    tools=self.tools,
-                    tool_choice="auto",
-                    temperature=self.config.temperature
-                )
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.config.model,
+                        messages=messages,
+                        tools=self.tools,
+                        tool_choice="auto",
+                        temperature=self.config.temperature
+                    )
+                except Exception as api_error:
+                    logger.error(f"API 调用失败 (迭代 {iteration + 1}): {api_error}")
+                    
+                    # 如果已经有结果，直接返回
+                    if "meme_path" in final_result:
+                        logger.info("API 失败，但已有结果，提前返回")
+                        final_result["explanation"] = final_result.get("explanation", "已为你找到合适的梗图")
+                        final_result["reasoning_steps"] = reasoning_steps
+                        final_result["status"] = "success"
+                        return final_result
+                    
+                    # 如果是 500 错误且已经尝试多次，返回错误
+                    if "500" in str(api_error) or "Internal" in str(api_error):
+                        return {
+                            "error": f"API 服务暂时不可用，请稍后重试: {str(api_error)}",
+                            "reasoning_steps": reasoning_steps,
+                            "status": "error"
+                        }
+                    
+                    # 其他错误继续抛出
+                    raise
                 
                 message = response.choices[0].message
                 
@@ -342,8 +364,13 @@ class MemeAgent:
                 # 如果已经获取到 meme 且质量足够好，可以提前结束
                 if "meme_path" in final_result:
                     if final_result.get("source") == "generated":
-                        # 生成的直接可用
-                        continue
+                        # 生成的直接可用，强制结束避免重复调用
+                        logger.info("已生成 meme，准备结束")
+                        # 添加一个特殊的消息告诉 Agent 任务完成
+                        messages.append({
+                            "role": "user",
+                            "content": "任务已完成，请给出最终推荐理由并结束。"
+                        })
                     elif final_result.get("search_score", 0) >= self.config.search_score_threshold:
                         # 检索结果质量好，可以结束
                         logger.info("检索结果质量足够，准备生成解释")

@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from agent.agent_core import create_agent
+from agent.config import AgentConfig
 from agent.tools import setup_mock_tools
 
 
@@ -22,19 +23,31 @@ def main():
     print("Meme Agent - 简单示例")
     print("=" * 60)
     
-    # 1. 检查 API key
+    # 1. 获取 API key（优先使用环境变量，否则使用 config 中的默认值）
     api_key = os.getenv("SAMBANOVA_API_KEY")
     if not api_key:
-        print("\n⚠️  警告: 未设置 SAMBANOVA_API_KEY 环境变量")
-        print("请运行: export SAMBANOVA_API_KEY='your-key'")
-        print("\n继续使用 mock 工具进行演示...\n")
+        # 从 config.py 读取默认 API key（不需要实例化，直接使用默认值）
+        from agent.config import AgentConfig as DefaultConfig
+        # 检查默认值
+        import inspect
+        sig = inspect.signature(DefaultConfig)
+        default_key = sig.parameters['api_key'].default
+        if default_key and default_key != inspect.Parameter.empty and default_key != "":
+            api_key = default_key
+            print("\n✓ 使用 config.py 中配置的默认 API key")
+        else:
+            print("\n⚠️  警告: 未找到 API key")
+            print("请在 config.py 中设置 api_key 默认值或设置环境变量")
+            print("\n继续使用 mock 工具进行演示...\n")
     
     # 2. 创建 Agent
     print("\n[1] 创建 Agent...")
     agent = create_agent(
-        api_key=api_key or "demo-key",
+        api_key=api_key if api_key else "demo-key",
         model="Meta-Llama-3.1-8B-Instruct"
     )
+    print(f"    模型: Meta-Llama-3.1-8B-Instruct")
+    print(f"    API key: {'已配置 ✓' if api_key else '未配置 ✗'}")
     
     # 3. 注册工具（mock 版本）
     print("[2] 注册工具...")

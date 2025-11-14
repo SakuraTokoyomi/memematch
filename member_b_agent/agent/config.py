@@ -20,7 +20,7 @@ class AgentConfig:
     
     # 推理参数
     temperature: float = 0.7
-    max_iterations: int = 10
+    max_iterations: int = 6  # 减少到 6 次，避免过多 API 调用
     timeout: int = 30
     
     # 检索阈值
