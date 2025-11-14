@@ -42,10 +42,13 @@ class TestAgentBasic:
         assert "search_meme" in self.agent.tool_functions
         assert "generate_meme" in self.agent.tool_functions
         
-        # 测试工具调用
+        # 测试工具调用（v2 格式）
         result = self.agent.tool_functions["search_meme"]("tired", 3)
-        assert "results" in result
-        assert len(result["results"]) <= 3
+        assert result.get("success") == True
+        assert "data" in result
+        assert "results" in result["data"]
+        assert len(result["data"]["results"]) <= 3
+        assert "metadata" in result  # v2 新增
     
     def test_refine_query(self):
         """测试查询改写"""
@@ -123,24 +126,32 @@ class TestAgentIntegration:
 
 
 class TestToolInterface:
-    """工具接口测试"""
+    """工具接口测试（v2）"""
     
     def test_mock_search_meme(self):
-        """测试 mock 搜索工具"""
+        """测试 mock 搜索工具（v2 格式）"""
         result = mock_search_meme("tired", top_k=3)
         
-        assert "results" in result
-        assert len(result["results"]) <= 3
-        assert all("score" in r for r in result["results"])
-        assert all("image_path" in r for r in result["results"])
+        # v2 格式断言
+        assert result.get("success") == True
+        assert "data" in result
+        assert "metadata" in result
+        assert "results" in result["data"]
+        assert len(result["data"]["results"]) <= 3
+        assert all("score" in r for r in result["data"]["results"])
+        assert all("image_path" in r for r in result["data"]["results"])
     
     def test_mock_generate_meme(self):
-        """测试 mock 生成工具"""
+        """测试 mock 生成工具（v2 格式）"""
         result = mock_generate_meme("不想努力", template="drake")
         
-        assert "image_path" in result
-        assert result["template"] == "drake"
-        assert result["text"] == "不想努力"
+        # v2 格式断言
+        assert result.get("success") == True
+        assert "data" in result
+        assert "metadata" in result
+        assert "image_path" in result["data"]
+        assert result["data"]["template"] == "drake"
+        assert result["data"]["text"] == "不想努力"
 
 
 def test_create_agent_helper():

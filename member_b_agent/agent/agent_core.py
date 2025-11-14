@@ -30,12 +30,13 @@ class MemeAgent:
     使用 SambaNova Cloud + Function Calling 实现智能 meme 推荐
     """
     
-    def __init__(self, config: Optional[AgentConfig] = None):
+    def __init__(self, config: Optional[AgentConfig] = None, session_manager=None):
         """
         初始化 Agent
         
         Args:
             config: Agent 配置，如果为 None 则从环境变量加载
+            session_manager: 会话管理器实例（可选）
         """
         self.config = config or AgentConfig.from_env()
         
@@ -50,6 +51,9 @@ class MemeAgent:
         
         # 定义工具 schema
         self.tools = self._define_tools()
+        
+        # 会话管理器（可选）
+        self.session_manager = session_manager
         
         logger.info(f"Agent 初始化完成，使用模型: {self.config.model}")
     
@@ -206,7 +210,8 @@ class MemeAgent:
         self, 
         user_query: str, 
         max_iterations: Optional[int] = None,
-        debug: bool = False
+        debug: bool = False,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         处理用户查询的主函数（Agent 推理循环）
@@ -215,6 +220,7 @@ class MemeAgent:
             user_query: 用户输入的查询文本
             max_iterations: 最大迭代次数，默认使用配置中的值
             debug: 是否输出调试信息
+            session_id: 会话 ID（可选），用于多轮对话
             
         Returns:
             {
@@ -223,16 +229,26 @@ class MemeAgent:
                 "candidates": [前 k 个候选结果],
                 "reasoning_steps": [Agent 推理步骤],
                 "status": "success|error",
-                "source": "search|generated"
+                "source": "search|generated",
+                "session_id": "会话ID"
             }
         """
         max_iterations = max_iterations or self.config.max_iterations
         
         # 初始化对话历史
-        messages = [
-            {"role": "system", "content": self._get_system_prompt()},
-            {"role": "user", "content": user_query}
-        ]
+        if session_id and self.session_manager:
+            # 使用会话管理器获取历史
+            messages = self.session_manager.get_messages(session_id, self._get_system_prompt())
+            messages.append({"role": "user", "content": user_query})
+            logger.info(f"使用会话 {session_id}，历史消息数: {len(messages)}")
+        else:
+            # 无会话：单次查询模式
+            messages = [
+                {"role": "system", "content": self._get_system_prompt()},
+                {"role": "user", "content": user_query}
+            ]
+            if session_id:
+                logger.warning(f"会话 ID {session_id} 已提供，但未启用会话管理器")
         
         reasoning_steps = []
         final_result = {}
@@ -335,24 +351,28 @@ class MemeAgent:
                         "result": result
                     })
                     
-                    # 保存检索结果
-                    if tool_name == "search_meme" and "error" not in result:
-                        results = result.get("results", [])
-                        if results:
-                            final_result.update({
-                                "meme_path": results[0].get("image_path"),
-                                "candidates": results,
-                                "source": "search",
-                                "search_score": results[0].get("score", 0)
-                            })
+                    # 保存检索结果（v2 格式）
+                    if tool_name == "search_meme":
+                        if result.get("success") and result.get("data"):
+                            data = result["data"]
+                            results = data.get("results", [])
+                            if results:
+                                final_result.update({
+                                    "meme_path": results[0].get("image_path"),
+                                    "candidates": results,
+                                    "source": "search",
+                                    "search_score": results[0].get("score", 0)
+                                })
                     
-                    # 保存生成结果
-                    if tool_name == "generate_meme" and "error" not in result:
-                        final_result.update({
-                            "meme_path": result.get("image_path"),
-                            "candidates": [],
-                            "source": "generated"
-                        })
+                    # 保存生成结果（v2 格式）
+                    if tool_name == "generate_meme":
+                        if result.get("success") and result.get("data"):
+                            data = result["data"]
+                            final_result.update({
+                                "meme_path": data.get("image_path"),
+                                "candidates": [],
+                                "source": "generated"
+                            })
                     
                     # 添加工具返回结果到对话历史
                     messages.append({
@@ -400,6 +420,13 @@ class MemeAgent:
             )
         
         final_result["reasoning_steps"] = reasoning_steps
+        
+        # 如果使用会话管理，更新会话历史
+        if session_id and self.session_manager:
+            # 保存最终的 messages（包含本次完整对话）
+            self.session_manager.update_messages(session_id, messages)
+            final_result["session_id"] = session_id
+            logger.info(f"会话 {session_id} 已更新")
         
         logger.info(f"查询处理完成，状态: {final_result.get('status', 'unknown')}")
         return final_result
