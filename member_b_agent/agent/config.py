@@ -32,8 +32,13 @@ class AgentConfig:
     @classmethod
     def from_env(cls) -> 'AgentConfig':
         """从环境变量加载配置"""
+        # 如果环境变量为空，使用硬编码的默认值
+        api_key = os.getenv("SAMBANOVA_API_KEY", "")
+        if not api_key:  # 环境变量为空时使用硬编码值
+            api_key = "9a2266c7-a96a-4459-be90-af5dfc58a655"
+        
         return cls(
-            api_key=os.getenv("SAMBANOVA_API_KEY", ""),
+            api_key=api_key,
             base_url=os.getenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1"),
             model=os.getenv("SAMBANOVA_MODEL", "Meta-Llama-3.1-8B-Instruct"),
             temperature=float(os.getenv("AGENT_TEMPERATURE", "0.7")),

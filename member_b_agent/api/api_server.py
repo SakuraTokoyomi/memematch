@@ -14,19 +14,23 @@ sys.path.insert(0, parent_dir)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 import logging
 
 from agent.agent_core import create_agent
-from agent.tools import setup_mock_tools
+from agent.real_tools import setup_real_tools  # 使用真实搜索引擎
 from agent.session_manager import SessionManager
 
 
 # ============ 配置 ============
 
-# 设置日志
-logging.basicConfig(level=logging.INFO)
+# 设置日志 - 显示详细信息
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # 创建 FastAPI 应用
@@ -44,6 +48,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 配置静态文件服务 - 提供图片访问
+# 将 dataset/meme 目录映射到 /static/ 路径
+MEME_IMAGE_DIR = os.path.join(os.path.dirname(parent_dir), 'dataset', 'meme')
+if os.path.exists(MEME_IMAGE_DIR):
+    app.mount("/static", StaticFiles(directory=MEME_IMAGE_DIR), name="static")
+    logger.info(f"✅ 静态文件服务已配置: {MEME_IMAGE_DIR} -> /static/")
+else:
+    logger.warning(f"⚠️  图片目录不存在: {MEME_IMAGE_DIR}")
 
 
 # ============ 全局变量 ============
@@ -113,21 +126,29 @@ async def startup_event():
         session_timeout=3600
     )
     
-    # 创建 Agent
+    # 创建 Agent（使用配置中的默认API key）
     agent = create_agent(
-        api_key=os.getenv("SAMBANOVA_API_KEY", "your-api-key"),
+        api_key=os.getenv("SAMBANOVA_API_KEY") or "9a2266c7-a96a-4459-be90-af5dfc58a655",
         model="Meta-Llama-3.1-8B-Instruct"
     )
     agent.session_manager = session_manager
     
-    # 注册工具（使用 mock）
-    setup_mock_tools(agent)
+    # 注册工具（使用真实搜索引擎）
+    setup_real_tools(agent)
     
-    # 隐藏技术日志
-    logging.getLogger("agent.agent_core").setLevel(logging.WARNING)
-    logging.getLogger("agent.session_manager").setLevel(logging.WARNING)
+    # 配置日志级别 - 显示完整的处理流程
+    logger.info("🐛 详细日志模式已启用（DEBUG级别）")
+    
+    # Agent核心模块显示DEBUG级别（包含所有详细日志）
+    logging.getLogger("agent.agent_core").setLevel(logging.DEBUG)
+    logging.getLogger("agent.real_tools").setLevel(logging.DEBUG)
+    logging.getLogger("agent.session_manager").setLevel(logging.DEBUG)
+    
+    # 隐藏第三方库的详细日志
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
     
     logger.info("✅ Agent 服务初始化完成")
 
@@ -173,25 +194,39 @@ async def query_meme(request: QueryRequest):
     
     try:
         # 调用 Agent
+        logger.info(f"📥 收到查询请求: {request.text[:50]}...")
+        
         result = agent.process_query(
             user_query=request.text,
             max_iterations=request.max_iterations,
             session_id=request.session_id
         )
         
+        # 🐛 DEBUG: 打印Agent返回的完整结果
+        logger.debug(f"🔍 Agent返回结果: {result}")
+        
         # 转换为标准响应格式
         if result.get("status") == "success":
-            return QueryResponse(
+            response = QueryResponse(
                 success=True,
                 meme_path=result.get("meme_path"),
                 explanation=result.get("explanation"),
                 source=result.get("source"),
                 session_id=result.get("session_id")
             )
+            
+            # 🐛 DEBUG: 打印API响应
+            logger.debug(f"📤 API响应: success={response.success}, meme_path={response.meme_path}")
+            logger.info(f"✅ 查询成功: {response.meme_path}")
+            
+            return response
         else:
+            error_msg = result.get("error", "未知错误")
+            logger.warning(f"❌ 查询失败: {error_msg}")
+            
             return QueryResponse(
                 success=False,
-                error=result.get("error", "未知错误"),
+                error=error_msg,
                 session_id=result.get("session_id")
             )
     

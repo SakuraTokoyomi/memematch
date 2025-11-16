@@ -1,7 +1,10 @@
 import os
 
 # --- 1. 基础路径配置 ---
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# member_a_search目录
+SEARCH_DIR = os.path.dirname(os.path.abspath(__file__))
+# 项目根目录
+BASE_DIR = os.path.dirname(SEARCH_DIR)
 DATA_DIR = os.path.join(BASE_DIR, 'dataset')
 
 # --- 2. 输入数据路径 ---
@@ -9,7 +12,8 @@ CSV_PATH = os.path.join(DATA_DIR, 'memeWithEmo.csv')
 IMAGES_DIR = os.path.join(DATA_DIR, 'meme') 
 
 # --- 3. 输出文件路径 ---
-OUTPUT_DIR = os.path.join(BASE_DIR, 'search', 'output')
+# 修正：输出目录在member_a_search/output/
+OUTPUT_DIR = os.path.join(SEARCH_DIR, 'output')
 os.makedirs(OUTPUT_DIR, exist_ok=True) 
 
 # --- 4. 模型配置 ---

@@ -210,7 +210,6 @@ class MemeAgent:
         self, 
         user_query: str, 
         max_iterations: Optional[int] = None,
-        debug: bool = False,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -219,7 +218,6 @@ class MemeAgent:
         Args:
             user_query: 用户输入的查询文本
             max_iterations: 最大迭代次数，默认使用配置中的值
-            debug: 是否输出调试信息
             session_id: 会话 ID（可选），用于多轮对话
             
         Returns:
@@ -253,16 +251,20 @@ class MemeAgent:
         reasoning_steps = []
         final_result = {}
         
-        logger.info(f"开始处理查询: {user_query}")
+        logger.info(f"🚀 ========== 开始处理查询 ==========")
+        logger.info(f"📝 用户输入: {user_query}")
+        logger.info(f"🔄 最大迭代次数: {max_iterations}")
+        logger.info(f"💬 会话ID: {session_id or 'None (单次查询)'}")
+        logger.debug(f"📨 初始消息数: {len(messages)}")
         
         try:
             for iteration in range(max_iterations):
-                if debug:
-                    print(f"\n{'='*60}")
-                    print(f"迭代 {iteration + 1}/{max_iterations}")
-                    print('='*60)
+                logger.info(f"{'='*50}")
+                logger.info(f"🔄 迭代 {iteration + 1}/{max_iterations}")
+                logger.info(f"{'='*50}")
                 
                 # 调用 LLM（带 Function Calling）
+                logger.debug(f"🤖 迭代 {iteration + 1}/{max_iterations}: 调用LLM...")
                 try:
                     response = self.client.chat.completions.create(
                         model=self.config.model,
@@ -271,6 +273,7 @@ class MemeAgent:
                         tool_choice="auto",
                         temperature=self.config.temperature
                     )
+                    logger.debug(f"✅ LLM响应成功")
                 except Exception as api_error:
                     logger.error(f"API 调用失败 (迭代 {iteration + 1}): {api_error}")
                     
@@ -297,7 +300,8 @@ class MemeAgent:
                 
                 # 如果没有工具调用，说明 Agent 认为任务完成
                 if not message.tool_calls:
-                    logger.info("Agent 完成推理，返回最终结果")
+                    logger.info("✅ Agent完成推理，无更多工具调用")
+                    logger.debug(f"💬 最终回复: {message.content[:100]}...")
                     final_result.update({
                         "explanation": message.content,
                         "reasoning_steps": reasoning_steps,
@@ -324,19 +328,30 @@ class MemeAgent:
                         logger.error(f"工具参数解析失败: {e}")
                         tool_args = {}
                     
-                    if debug:
-                        print(f"\n[工具调用] {tool_name}")
-                        print(f"[参数] {json.dumps(tool_args, ensure_ascii=False, indent=2)}")
-                    
-                    logger.info(f"调用工具: {tool_name}({tool_args})")
+                    logger.info(f"🔧 调用工具: {tool_name}")
+                    logger.debug(f"📋 工具参数: {json.dumps(tool_args, ensure_ascii=False, indent=2)}")
                     
                     # 执行工具
                     try:
+                        logger.debug(f"⚙️  开始执行工具: {tool_name}")
                         result = self._execute_tool(tool_name, tool_args)
                         result_str = json.dumps(result, ensure_ascii=False)
                         
-                        if debug:
-                            print(f"[返回] {result_str[:200]}...")
+                        # 打印工具返回结果的关键信息
+                        if isinstance(result, dict):
+                            if result.get("success"):
+                                logger.info(f"✅ 工具执行成功: {tool_name}")
+                                if tool_name == "search_meme" and result.get("data"):
+                                    data = result["data"]
+                                    logger.info(f"🔍 搜索结果: 找到 {data.get('total', 0)} 个结果")
+                                    if data.get("results"):
+                                        top_result = data["results"][0]
+                                        logger.debug(f"   Top-1: {top_result.get('image_path')} (score: {top_result.get('score', 0):.4f})")
+                            else:
+                                logger.warning(f"⚠️  工具返回失败: {tool_name}")
+                                logger.debug(f"   错误: {result.get('error', 'Unknown')}")
+                        
+                        logger.debug(f"📦 完整返回: {result_str[:300]}...")
                         
                     except Exception as e:
                         logger.error(f"工具执行失败: {e}")
@@ -357,22 +372,28 @@ class MemeAgent:
                             data = result["data"]
                             results = data.get("results", [])
                             if results:
+                                meme_path = results[0].get("image_path")
+                                score = results[0].get("score", 0)
                                 final_result.update({
-                                    "meme_path": results[0].get("image_path"),
+                                    "meme_path": meme_path,
                                     "candidates": results,
                                     "source": "search",
-                                    "search_score": results[0].get("score", 0)
+                                    "search_score": score
                                 })
+                                logger.info(f"💾 保存搜索结果: {meme_path}")
+                                logger.debug(f"   分数: {score:.4f}, 候选数: {len(results)}")
                     
                     # 保存生成结果（v2 格式）
                     if tool_name == "generate_meme":
                         if result.get("success") and result.get("data"):
                             data = result["data"]
+                            meme_path = data.get("image_path")
                             final_result.update({
-                                "meme_path": data.get("image_path"),
+                                "meme_path": meme_path,
                                 "candidates": [],
                                 "source": "generated"
                             })
+                            logger.info(f"💾 保存生成结果: {meme_path}")
                     
                     # 添加工具返回结果到对话历史
                     messages.append({
@@ -426,9 +447,19 @@ class MemeAgent:
             # 保存最终的 messages（包含本次完整对话）
             self.session_manager.update_messages(session_id, messages)
             final_result["session_id"] = session_id
-            logger.info(f"会话 {session_id} 已更新")
+            logger.debug(f"💬 会话已保存: {session_id}")
         
-        logger.info(f"查询处理完成，状态: {final_result.get('status', 'unknown')}")
+        # 打印最终结果摘要
+        logger.info(f"🎉 ========== 查询处理完成 ==========")
+        logger.info(f"📊 状态: {final_result.get('status', 'unknown')}")
+        if final_result.get("meme_path"):
+            logger.info(f"🖼️  Meme路径: {final_result['meme_path']}")
+            logger.info(f"📍 来源: {final_result.get('source', 'unknown')}")
+        if final_result.get("error"):
+            logger.warning(f"❌ 错误: {final_result['error']}")
+        logger.info(f"🔄 推理步骤数: {len(reasoning_steps)}")
+        logger.debug(f"📦 完整结果: {json.dumps(final_result, ensure_ascii=False, indent=2)}")
+        
         return final_result
     
     def _execute_tool(self, tool_name: str, args: Dict) -> Dict:

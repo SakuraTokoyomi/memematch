@@ -7,8 +7,9 @@ python-dotenv>=1.0.0       # 环境变量管理
 # 深度学习和向量计算
 torch>=2.0.0               # PyTorch
 sentence-transformers>=2.2.0  # 句子编码（用于向量检索）
-numpy>=1.24.0              # 数值计算
+numpy>=1.24.0,<2.0         # 数值计算（兼容PyTorch）
 pandas>=2.0.0              # 数据处理
+faiss-cpu>=1.7.4           # Faiss向量检索（成员A搜索引擎需要）
 
 # Web API（成员 D 对接）
 fastapi>=0.104.0           # FastAPI 框架
