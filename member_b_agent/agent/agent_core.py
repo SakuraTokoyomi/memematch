@@ -129,68 +129,43 @@ class MemeAgent:
         Returns:
             系统提示词
         """
-        return """你是一个专业的 meme（梗图）推荐助手 Meme Agent。你的任务是帮助用户找到或生成最合适的梗图来表达他们的情绪。
+        return """你是梗图推荐助手。用户告诉你心情，你用工具找到合适的梗图。
 
-## 你的能力
+你有2个工具可用：
+1. search_meme - 搜索现有梗图
+2. generate_meme - 生成新梗图
 
-你可以使用以下工具：
-1. **search_meme**: 从数据库检索现有的梗图（支持中文和英文查询）
-2. **generate_meme**: 生成新的梗图（仅当搜索失败或分数太低时使用）
+## 重要：如何使用工具
+
+你必须使用Function Calling来调用工具，不要把工具调用写成文本！
+系统会自动识别你的tool_calls并执行。
 
 ## 工作流程
 
-1. **提取核心情绪词**
-   - 从用户输入中提取核心情绪/状态词
-   - 例如：用户说"今天好开心" → 提取"开心"
-   - 例如：用户说"我太累了" → 提取"累"
-   - 例如：用户说"无语了" → 提取"无语"
+1. 用户是问候语（"你好"、"在吗"）
+   → 直接回复："你好！告诉我你的心情，我帮你找梗图！😊"
+   → 不调用工具
 
-2. **调用 search_meme 搜索**
-   - 用提取的核心词作为 query 参数
-   - **重要：query 必须是简短的情绪词，不要包含"今天"、"我"等无关词**
-   - 正确示例：search_meme(query="开心", top_k=5)
-   - 正确示例：search_meme(query="累", top_k=5)
-   - 错误示例：search_meme(query="今天好开心", top_k=5) ❌
+2. 用户表达情绪（"开心"、"累"、"无语"、"又咋了"）
+   → 提取核心情绪词
+   → 调用 search_meme 工具（使用Function Calling）
+   → 参数：{"query": "核心情绪词", "top_k": 5}
    
-3. **检查搜索结果**
-   - 如果 search_meme 成功返回结果（success=True）
-   - 检查 Top-1 的 score 分数：
-     * score >= 0.6：结果很好，**直接使用，不要调用 generate_meme**
-     * score < 0.6：结果不够好，考虑生成新梗图
+3. 根据搜索结果
+   → score >= 0.6：用这个梗图
+   → score < 0.6：调用 generate_meme
+   
+4. 给出1句推荐理由（口语化，不提技术细节）
 
-4. **生成新梗图（仅在必要时）**
-   - **只有在以下情况才调用 generate_meme：**
-     * search_meme 失败（返回错误）
-     * 或者 Top-1 score < 0.6
-   - **如果 search_meme 成功且 score >= 0.6，直接给出推荐理由，结束任务**
+## 情绪词提取示例
 
-5. **给出推荐理由**
-   - 用 1-2 句话自然地解释为什么推荐这个梗图
+- "今天好开心" → 提取"开心"
+- "累死了" → 提取"累"
+- "无语" → 提取"无语"  
+- "又咋了" → 提取"疑问"
+- "我服了" → 提取"服了"
 
-## 示例对话
-
-用户："今天好开心"
-你的思考：核心情绪是"开心"
-你的操作：search_meme(query="开心", top_k=5)
-
-用户："我太难了"
-你的思考：核心情绪是"难"或"累"
-你的操作：search_meme(query="难", top_k=5)
-
-用户："服了"
-你的思考：核心情绪是"服了"或"无语"
-你的操作：search_meme(query="服了", top_k=5)
-
-## 重要规则
-
-- 始终用中文和用户交流
-- **search_meme 的 query 参数必须是简短的核心情绪词**
-- 不要把整句话作为 query，只提取关键词
-- **找到合适的梗图后（score >= 0.6）立即给出推荐理由，不要再调用其他工具**
-- **只有在搜索失败或分数太低时才生成新梗图**
-- 推荐理由要自然、口语化
-
-开始工作吧！"""
+开始工作！"""
 
     def process_query(
         self, 
@@ -243,6 +218,9 @@ class MemeAgent:
         logger.info(f"💬 会话ID: {session_id or 'None (单次查询)'}")
         logger.debug(f"📨 初始消息数: {len(messages)}")
         
+        # 检查是否是新会话（只有system prompt + 用户消息）
+        is_new_session = len(messages) <= 2
+        
         try:
             for iteration in range(max_iterations):
                 logger.info(f"{'='*50}")
@@ -251,15 +229,29 @@ class MemeAgent:
                 
                 # 调用 LLM（带 Function Calling）
                 logger.debug(f"🤖 迭代 {iteration + 1}/{max_iterations}: 调用LLM...")
+                
+                # 🚨 第一次迭代：检查是否需要强制工具调用
+                greetings = ["你好", "hi", "hello", "在吗", "在不在", "hey"]
+                is_greeting = any(greet in user_query.lower() for greet in greetings)
+                
+                # 只在新会话、第一次迭代、非问候语时强制调用工具
+                if iteration == 0 and is_new_session and not is_greeting:
+                    tool_choice = "required"  # 强制必须调用工具
+                    logger.debug("🔒 新会话第一次查询（非问候语），强制要求调用工具")
+                else:
+                    tool_choice = "auto"
+                    if iteration == 0 and not is_new_session:
+                        logger.debug("🔓 会话延续，允许LLM自主决定是否调用工具")
+                
                 try:
                     response = self.client.chat.completions.create(
                         model=self.config.model,
                         messages=messages,
                         tools=self.tools,
-                        tool_choice="auto",
+                        tool_choice=tool_choice,
                         temperature=self.config.temperature
                     )
-                    logger.debug(f"✅ LLM响应成功")
+                    logger.debug(f"✅ LLM响应成功: reponse {response}")
                 except Exception as api_error:
                     logger.error(f"API 调用失败 (迭代 {iteration + 1}): {api_error}")
                     
@@ -294,8 +286,8 @@ class MemeAgent:
                         "status": "success"
                     })
                     
-                    # 如果之前没有获取到 meme，说明出错了
-                    if "meme_path" not in final_result:
+                    # 如果之前没有获取到 meme，说明出错了（但问候语除外）
+                    if "meme_path" not in final_result and not is_greeting:
                         final_result["error"] = "未能获取 meme"
                         final_result["status"] = "error"
                     
@@ -396,7 +388,7 @@ class MemeAgent:
                         # 添加一个特殊的消息告诉 Agent 任务完成
                         messages.append({
                             "role": "user",
-                            "content": "✅ 任务已完成！你已经找到/生成了梗图，现在请用1-2句话给出推荐理由并结束。不要再调用任何工具。"
+                            "content": "✅ 很好！你已经生成了梗图。现在请用1-2句话，用轻松、友好的语气给出推荐理由，然后结束任务。不要再调用任何工具。"
                         })
                     elif final_result.get("search_score", 0) >= self.config.search_score_threshold:
                         # 检索结果质量好，强制结束
@@ -404,7 +396,7 @@ class MemeAgent:
                         # 添加强制结束消息
                         messages.append({
                             "role": "user",
-                            "content": f"✅ 任务已完成！你已经找到了合适的梗图（分数={final_result.get('search_score'):.4f}），现在请用1-2句话给出推荐理由并结束。不要再调用任何工具（特别是不要调用generate_meme）。"
+                            "content": f"✅ 很好！你已经找到了非常合适的梗图。现在请用1-2句话，用轻松、友好、共情的语气给出推荐理由（不要提及分数、匹配度等技术信息），然后结束任务。不要再调用任何工具。"
                         })
             
             # 达到最大迭代次数

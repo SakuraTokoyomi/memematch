@@ -136,10 +136,10 @@ async def startup_event():
         session_timeout=3600
     )
     
-    # 创建 Agent（使用配置中的默认API key）
+    # 创建 Agent（使用LLaMA 3.3 70B - 最新版本）
     agent = create_agent(
         api_key=os.getenv("SAMBANOVA_API_KEY") or "9a2266c7-a96a-4459-be90-af5dfc58a655",
-        model="Meta-Llama-3.1-8B-Instruct"
+        model="Meta-Llama-3.3-70B-Instruct"  # 3.3版本，Function Calling更稳定
     )
     agent.session_manager = session_manager
     
