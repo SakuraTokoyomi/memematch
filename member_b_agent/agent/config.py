@@ -23,8 +23,8 @@ class AgentConfig:
     max_iterations: int = 6  # 减少到 6 次，避免过多 API 调用
     timeout: int = 30
     
-    # 检索阈值
-    search_score_threshold: float = 0.6
+    # 检索阈值（找到这个分数以上的结果就直接使用，不再生成）
+    search_score_threshold: float = 0.6  # 0.6以上认为是好结果
     
     # 日志级别
     log_level: str = "INFO"

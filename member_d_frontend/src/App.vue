@@ -1,746 +1,776 @@
 <template>
-  <div class="app-container">
-    <!-- Header -->
+  <div id="app">
+    <!-- 头部 -->
     <header class="header">
       <div class="header-content">
-        <h1 class="title">
-          <span class="emoji">🎭</span>
-          MemeMatch
-        </h1>
-        <p class="subtitle">AI驱动的智能梗图推荐</p>
-        <div class="status-badge" :class="{ 'online': isOnline, 'offline': !isOnline }">
-          <span class="dot"></span>
-          {{ isOnline ? '服务在线' : '服务离线' }}
+        <div class="logo-section">
+          <div class="logo-icon">🎭</div>
+          <div class="logo-text">
+            <h1 class="title">Meme Match</h1>
+            <p class="subtitle">智能梗图推荐助手</p>
+          </div>
+        </div>
+        
+        <!-- Session 控制 -->
+        <div class="session-controls">
+          <div class="session-info">
+            <span class="session-label">Session:</span>
+            <span class="session-id">{{ sessionId ? sessionId.substring(8, 16) : '单次' }}</span>
+          </div>
+          <button 
+            v-if="sessionId" 
+            @click="clearSessionData"
+            class="btn btn-danger"
+          >
+            清除对话
+          </button>
+          <button 
+            v-else
+            @click="createSession"
+            class="btn btn-success"
+          >
+            启用会话
+          </button>
         </div>
       </div>
     </header>
 
-    <!-- Main Content -->
-    <main class="main-content">
-      <div class="container">
-        
-        <!-- Search Box -->
-        <div class="search-section">
-          <div class="search-box">
-            <textarea 
-              v-model="userInput"
-              @keydown.enter.exact.prevent="handleSearch"
-              placeholder="告诉我你现在的心情或想法... 🤔&#10;例如：我太累了 / I'm so tired / 今天好开心"
-              class="search-input"
-              :disabled="isLoading"
-            ></textarea>
-            <button 
-              @click="handleSearch" 
-              class="search-button"
-              :disabled="isLoading || !userInput.trim()"
-            >
-              <span v-if="!isLoading">🔍 寻找梗图</span>
-              <span v-else class="loading-text">
-                <span class="spinner"></span>
-                思考中...
-              </span>
-            </button>
-          </div>
-          
-          <!-- Quick Examples -->
-          <div class="examples">
-            <span class="examples-label">试试这些：</span>
-            <button 
-              v-for="example in examples" 
-              :key="example"
-              @click="userInput = example; handleSearch()"
-              class="example-btn"
-              :disabled="isLoading"
-            >
-              {{ example }}
-            </button>
+    <!-- 对话区域 -->
+    <main class="chat-container">
+      <div class="chat-messages" ref="chatMessages">
+        <!-- 欢迎消息 -->
+        <div v-if="messages.length === 0" class="welcome-message">
+          <div class="welcome-icon">👋</div>
+          <h2>你好！我是 Meme Agent</h2>
+          <p>告诉我你的心情，我会为你推荐最合适的梗图～</p>
+          <div class="example-queries">
+            <button @click="exampleQuery('累了')" class="example-btn">累了</button>
+            <button @click="exampleQuery('开心')" class="example-btn">开心</button>
+            <button @click="exampleQuery('无语')" class="example-btn">无语</button>
+            <button @click="exampleQuery('服了')" class="example-btn">服了</button>
           </div>
         </div>
 
-        <!-- Error Message -->
-        <div v-if="error" class="error-message">
-          <span class="error-icon">⚠️</span>
-          <div>
-            <div class="error-title">哎呀，出错了</div>
-            <div class="error-detail">{{ error }}</div>
-          </div>
-          <button @click="error = null" class="close-btn">✕</button>
-        </div>
-
-        <!-- Results -->
-        <div v-if="result" class="results-section">
-          
-          <!-- AI Explanation -->
-          <div class="explanation-card">
-            <h3 class="card-title">
-              <span class="icon">💡</span>
-              AI 分析
-            </h3>
-            <p class="explanation-text">{{ result.explanation || '找到了适合你的梗图！' }}</p>
-            <div class="meta-info">
-              <span class="meta-item">
-                <span class="meta-icon">🎯</span>
-                来源: {{ result.source || '搜索引擎' }}
-              </span>
-              <span class="meta-item" v-if="result.session_id">
-                <span class="meta-icon">💬</span>
-                会话: {{ result.session_id.slice(0, 8) }}...
-              </span>
+        <!-- 对话消息 -->
+        <div v-for="(message, index) in messages" :key="index" class="message-wrapper">
+          <!-- 用户消息 -->
+          <div v-if="message.type === 'user'" class="message message-user">
+            <div class="message-bubble user-bubble">
+              <div class="message-text">{{ message.content }}</div>
+              <div class="message-time">{{ formatTime(message.timestamp) }}</div>
             </div>
+            <div class="message-avatar user-avatar">👤</div>
           </div>
 
-          <!-- Main Meme Display -->
-          <div class="meme-display">
-            <h3 class="card-title">
-              <span class="icon">🖼️</span>
-              推荐梗图
-            </h3>
-            <div v-if="result.meme_path" class="meme-card main-meme">
-              <div class="meme-image-container">
+          <!-- AI消息 -->
+          <div v-else-if="message.type === 'assistant'" class="message message-assistant">
+            <div class="message-avatar ai-avatar">🤖</div>
+            <div class="message-bubble ai-bubble">
+              <!-- 推理过程 -->
+              <div v-if="message.reasoning && message.reasoning.length > 0" class="reasoning-process">
+                <div class="reasoning-header">🔄 推理过程</div>
+                <div v-for="(step, idx) in message.reasoning" :key="idx" class="reasoning-step">
+                  <span class="step-badge">{{ step.tool }}</span>
+                  <span class="step-text">{{ formatStepText(step) }}</span>
+                </div>
+              </div>
+
+              <!-- 梗图结果 -->
+              <div v-if="message.meme" class="meme-result">
                 <img 
-                  :src="getMemeUrl(result.meme_path)" 
-                  :alt="result.explanation"
+                  :src="`http://localhost:8000/static/${extractFileName(message.meme.path)}`" 
+                  :alt="message.meme.explanation"
                   class="meme-image"
                   @error="handleImageError"
                 />
+                <div class="meme-explanation">
+                  {{ message.meme.explanation }}
+                </div>
+                <div class="meme-source">
+                  <span class="source-badge">{{ message.meme.source === 'search' ? '📚 检索' : '✨ 生成' }}</span>
+                </div>
               </div>
-              <div class="meme-actions">
-                <button @click="downloadMeme(result.meme_path)" class="action-btn download">
-                  <span>⬇️</span> 下载
-                </button>
-                <button @click="shareMeme(result.meme_path)" class="action-btn share">
-                  <span>📤</span> 分享
-                </button>
-                <button @click="copyPath(result.meme_path)" class="action-btn copy">
-                  <span>📋</span> 复制路径
-                </button>
+
+              <!-- 错误消息 -->
+              <div v-if="message.error" class="error-message">
+                <span class="error-icon">❌</span>
+                <span>{{ message.error }}</span>
               </div>
-            </div>
-            <div v-else class="no-meme">
-              <span class="no-meme-icon">🤷</span>
-              <p>未找到合适的梗图</p>
+
+              <div class="message-time">{{ formatTime(message.timestamp) }}</div>
             </div>
           </div>
 
-        </div>
-
-        <!-- History (Optional) -->
-        <div v-if="history.length > 0" class="history-section">
-          <h3 class="card-title">
-            <span class="icon">📜</span>
-            历史记录
-          </h3>
-          <div class="history-list">
-            <div 
-              v-for="(item, index) in history.slice().reverse()" 
-              :key="index"
-              class="history-item"
-              @click="userInput = item.query; handleSearch()"
-            >
-              <span class="history-query">{{ item.query }}</span>
-              <span class="history-time">{{ formatTime(item.time) }}</span>
+          <!-- 加载中状态 -->
+          <div v-else-if="message.type === 'loading'" class="message message-assistant">
+            <div class="message-avatar ai-avatar">🤖</div>
+            <div class="message-bubble ai-bubble">
+              <div class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
+      <!-- 输入区域 -->
+      <div class="chat-input-area">
+        <div class="input-container">
+          <input
+            v-model="userInput"
+            @keyup.enter="submitQuery"
+            type="text"
+            placeholder="输入你的心情..."
+            class="chat-input"
+            :disabled="loading"
+          />
+          <button
+            @click="submitQuery"
+            :disabled="loading || !userInput.trim()"
+            class="send-btn"
+          >
+            <span v-if="!loading">📤</span>
+            <span v-else class="spinner">⏳</span>
+          </button>
+        </div>
       </div>
     </main>
-
-    <!-- Footer -->
-    <footer class="footer">
-      <p>MemeMatch © 2024 | Powered by AI</p>
-    </footer>
   </div>
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
-import { queryMeme, healthCheck } from './api/memeApi'
+import { queryMemeStream, clearSession } from './api/memeApi'
 
 export default {
   name: 'App',
-  setup() {
-    const userInput = ref('')
-    const result = ref(null)
-    const isLoading = ref(false)
-    const error = ref(null)
-    const isOnline = ref(false)
-    const history = ref([])
-    
-    const examples = [
-      '我太累了',
-      '今天好开心',
-      'I\'m confused',
-      '无语了',
-      '震惊'
-    ]
-
-    // 健康检查
-    const checkHealth = async () => {
-      try {
-        await healthCheck()
-        isOnline.value = true
-      } catch (err) {
-        isOnline.value = false
-      }
+  data() {
+    return {
+      userInput: '',
+      loading: false,
+      sessionId: null,
+      messages: [], // 所有对话消息
+      currentReasoning: [], // 当前正在推理的步骤
     }
-
-    // 处理搜索
-    const handleSearch = async () => {
-      if (!userInput.value.trim() || isLoading.value) return
+  },
+  mounted() {
+    // 从localStorage恢复session
+    const savedSession = localStorage.getItem('meme_session_id')
+    if (savedSession) {
+      this.sessionId = savedSession
+    }
+    
+    // 从localStorage恢复对话历史
+    const savedMessages = localStorage.getItem('meme_messages')
+    if (savedMessages) {
+      this.messages = JSON.parse(savedMessages)
+    }
+  },
+  methods: {
+    createSession() {
+      this.sessionId = `session_${Date.now()}`
+      localStorage.setItem('meme_session_id', this.sessionId)
+    },
+    
+    async clearSessionData() {
+      if (this.sessionId) {
+        try {
+          await clearSession(this.sessionId)
+        } catch (e) {
+          console.error('清除session失败:', e)
+        }
+      }
+      this.sessionId = null
+      this.messages = []
+      localStorage.removeItem('meme_session_id')
+      localStorage.removeItem('meme_messages')
+    },
+    
+    exampleQuery(text) {
+      this.userInput = text
+      this.submitQuery()
+    },
+    
+    submitQuery() {
+      if (!this.userInput.trim() || this.loading) return
       
-      isLoading.value = true
-      error.value = null
-      result.value = null
+      const query = this.userInput.trim()
+      this.userInput = ''
       
-      try {
-        const response = await queryMeme(userInput.value.trim())
-        
-        if (response.success) {
-          result.value = response
+      // 添加用户消息
+      this.messages.push({
+        type: 'user',
+        content: query,
+        timestamp: Date.now()
+      })
+      
+      // 添加加载状态
+      this.messages.push({
+        type: 'loading',
+        timestamp: Date.now()
+      })
+      
+      this.loading = true
+      this.currentReasoning = []
+      
+      // 滚动到底部
+      this.$nextTick(() => {
+        this.scrollToBottom()
+      })
+      
+      // 使用流式API
+      queryMemeStream(query, this.sessionId, {
+        onStart: (data) => {
+          console.log('查询开始:', data)
+        },
+        onToolCall: (data) => {
+          console.log('工具调用:', data)
+          this.currentReasoning.push(data)
+          // 更新最后一条消息（移除loading，添加推理过程）
+          const lastMessage = this.messages[this.messages.length - 1]
+          if (lastMessage.type === 'loading') {
+            lastMessage.type = 'assistant'
+            lastMessage.reasoning = [...this.currentReasoning]
+          }
+          this.$nextTick(() => {
+            this.scrollToBottom()
+          })
+        },
+        onComplete: (data) => {
+          console.log('查询完成:', data)
+          this.loading = false
           
-          // 添加到历史
-          history.value.push({
-            query: userInput.value.trim(),
-            time: new Date()
+          // 移除loading消息
+          const loadingIndex = this.messages.findIndex(m => m.type === 'loading')
+          if (loadingIndex !== -1) {
+            this.messages.splice(loadingIndex, 1)
+          }
+          
+          // 添加AI回复
+          if (data.success) {
+            this.messages.push({
+              type: 'assistant',
+              reasoning: this.currentReasoning,
+              meme: {
+                path: data.meme_path,
+                explanation: data.explanation,
+                source: data.source
+              },
+              timestamp: Date.now()
+            })
+            
+            this.sessionId = data.session_id || this.sessionId
+            if (data.session_id) {
+              localStorage.setItem('meme_session_id', data.session_id)
+            }
+          } else {
+            this.messages.push({
+              type: 'assistant',
+              error: data.error || '查询失败',
+              timestamp: Date.now()
+            })
+          }
+          
+          // 保存消息到localStorage
+          localStorage.setItem('meme_messages', JSON.stringify(this.messages))
+          
+          this.$nextTick(() => {
+            this.scrollToBottom()
+          })
+        },
+        onError: (data) => {
+          console.error('查询错误:', data)
+          this.loading = false
+          
+          // 移除loading消息
+          const loadingIndex = this.messages.findIndex(m => m.type === 'loading')
+          if (loadingIndex !== -1) {
+            this.messages.splice(loadingIndex, 1)
+          }
+          
+          this.messages.push({
+            type: 'assistant',
+            error: data.error || '发生未知错误',
+            timestamp: Date.now()
           })
           
-          // 限制历史记录数量
-          if (history.value.length > 10) {
-            history.value.shift()
-          }
-        } else {
-          error.value = response.error || '查询失败，请重试'
+          this.$nextTick(() => {
+            this.scrollToBottom()
+          })
         }
-      } catch (err) {
-        error.value = err.response?.data?.detail || err.message || '网络错误，请检查后端服务是否运行'
-        console.error('Search error:', err)
-      } finally {
-        isLoading.value = false
-      }
-    }
-
-    // 获取图片URL
-    const getMemeUrl = (path) => {
-      if (!path) return ''
-      // 假设后端提供了静态文件服务
-      if (path.startsWith('http')) {
-        return path
-      }
-      return `http://localhost:8000/static/${path.replace(/^.*\/meme\//, '')}`
-    }
-
-    // 图片加载错误处理
-    const handleImageError = (e) => {
-      e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Ctext fill="%23999" x="50%25" y="50%25" text-anchor="middle" dy=".3em" font-family="sans-serif" font-size="20"%3E图片加载失败%3C/text%3E%3C/svg%3E'
-    }
-
-    // 下载梗图
-    const downloadMeme = (path) => {
-      const url = getMemeUrl(path)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = path.split('/').pop()
-      a.click()
-    }
-
-    // 分享梗图
-    const shareMeme = (path) => {
-      if (navigator.share) {
-        navigator.share({
-          title: 'MemeMatch 推荐',
-          text: `看看这个梗图：${result.value.explanation}`,
-          url: window.location.href
-        })
-      } else {
-        alert('您的浏览器不支持分享功能')
-      }
-    }
-
-    // 复制路径
-    const copyPath = (path) => {
-      navigator.clipboard.writeText(path).then(() => {
-        alert('路径已复制到剪贴板')
       })
-    }
-
-    // 格式化时间
-    const formatTime = (time) => {
-      const now = new Date()
-      const diff = (now - time) / 1000 // 秒
-      
-      if (diff < 60) return '刚刚'
-      if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
-      if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
-      return time.toLocaleDateString()
-    }
-
-    onMounted(() => {
-      checkHealth()
-      // 定期检查健康状态
-      setInterval(checkHealth, 30000)
-    })
-
-    return {
-      userInput,
-      result,
-      isLoading,
-      error,
-      isOnline,
-      history,
-      examples,
-      handleSearch,
-      getMemeUrl,
-      handleImageError,
-      downloadMeme,
-      shareMeme,
-      copyPath,
-      formatTime
+    },
+    
+    scrollToBottom() {
+      const container = this.$refs.chatMessages
+      if (container) {
+        container.scrollTop = container.scrollHeight
+      }
+    },
+    
+    formatTime(timestamp) {
+      const date = new Date(timestamp)
+      return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    },
+    
+    formatStepText(step) {
+      if (step.tool === 'search_meme') {
+        const query = step.arguments?.query || ''
+        const total = step.result?.data?.total || 0
+        return `搜索"${query}" → 找到 ${total} 个结果`
+      } else if (step.tool === 'classify_sentiment') {
+        const emotion = step.result?.emotion || ''
+        return `分析情绪 → ${emotion}`
+      }
+      return JSON.stringify(step.arguments)
+    },
+    
+    extractFileName(path) {
+      if (!path) return ''
+      const parts = path.split('/')
+      return parts[parts.length - 1]
+    },
+    
+    handleImageError(event) {
+      console.error('图片加载失败:', event.target.src)
+      event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23ddd" width="400" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3E图片加载失败%3C/text%3E%3C/svg%3E'
     }
   }
 }
 </script>
 
 <style scoped>
-.app-container {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+* {
+  box-sizing: border-box;
 }
 
-/* Header */
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+}
+
+/* 头部 */
 .header {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
-  padding: 2rem 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 15px 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .header-content {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 2rem;
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  font-size: 36px;
 }
 
 .title {
-  font-size: 3rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin-bottom: 0.5rem;
-}
-
-.emoji {
-  font-size: 3.5rem;
-  margin-right: 0.5rem;
+  font-size: 24px;
+  font-weight: bold;
+  margin: 0;
 }
 
 .subtitle {
-  color: #666;
-  font-size: 1.1rem;
-  margin-bottom: 1rem;
+  font-size: 12px;
+  opacity: 0.9;
+  margin: 2px 0 0 0;
 }
 
-.status-badge {
-  display: inline-flex;
+.session-controls {
+  display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  gap: 10px;
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.session-id {
+  padding: 4px 10px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 12px;
+  font-family: 'Courier New', monospace;
+}
+
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: rgba(220, 38, 38, 0.9);
+}
+
+.btn-success {
+  background: rgba(16, 185, 129, 0.9);
+  color: white;
+}
+
+.btn-success:hover {
+  background: rgba(5, 150, 105, 0.9);
+}
+
+/* 对话容器 */
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  scroll-behavior: smooth;
+}
+
+/* 欢迎消息 */
+.welcome-message {
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+}
+
+.welcome-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+
+.welcome-message h2 {
+  font-size: 28px;
+  color: #333;
+  margin: 0 0 10px 0;
+}
+
+.welcome-message p {
+  font-size: 16px;
+  margin: 0 0 30px 0;
+}
+
+.example-queries {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.example-btn {
+  padding: 10px 20px;
+  background: white;
+  border: 2px solid #667eea;
+  color: #667eea;
   border-radius: 20px;
-  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.example-btn:hover {
+  background: #667eea;
+  color: white;
+}
+
+/* 消息样式 */
+.message-wrapper {
+  margin-bottom: 20px;
+}
+
+.message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.message-user {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.user-avatar {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.ai-avatar {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.message-bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  position: relative;
+}
+
+.user-bubble {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.ai-bubble {
+  background: white;
+  color: #333;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.message-text {
+  font-size: 15px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.message-time {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 6px;
+  text-align: right;
+}
+
+/* 推理过程 */
+.reasoning-process {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.reasoning-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: #667eea;
+  margin-bottom: 8px;
+}
+
+.reasoning-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.step-badge {
+  padding: 3px 8px;
+  background: #e0e7ff;
+  color: #667eea;
+  border-radius: 10px;
+  font-size: 11px;
   font-weight: 600;
 }
 
-.status-badge.online {
-  background: #d4edda;
-  color: #155724;
+.step-text {
+  color: #666;
 }
 
-.status-badge.offline {
-  background: #f8d7da;
-  color: #721c24;
+/* 梗图结果 */
+.meme-result {
+  margin-top: 8px;
 }
 
-.dot {
+.meme-image {
+  width: 100%;
+  max-width: 400px;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.meme-explanation {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #333;
+  padding: 12px;
+  background: linear-gradient(135deg, #f3e7ff 0%, #fce7f3 100%);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.meme-source {
+  text-align: right;
+}
+
+.source-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+/* 错误消息 */
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #fef2f2;
+  border-radius: 8px;
+  color: #dc2626;
+}
+
+.error-icon {
+  font-size: 20px;
+}
+
+/* 加载动画 */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.typing-indicator span {
   width: 8px;
   height: 8px;
+  background: #667eea;
   border-radius: 50%;
-  background: currentColor;
-  animation: pulse 2s infinite;
+  animation: typing 1.4s infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
 }
 
-/* Main Content */
-.main-content {
-  flex: 1;
-  padding: 3rem 0;
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
 }
 
-.container {
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+/* 输入区域 */
+.chat-input-area {
+  background: white;
+  border-top: 1px solid #e5e7eb;
+  padding: 15px 20px;
+}
+
+.input-container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 2rem;
+  display: flex;
+  gap: 10px;
 }
 
-/* Search Section */
-.search-section {
-  margin-bottom: 2rem;
+.chat-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid #e5e7eb;
+  border-radius: 24px;
+  font-size: 15px;
+  transition: border-color 0.2s;
 }
 
-.search-box {
-  background: white;
-  border-radius: 20px;
-  padding: 1.5rem;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-  margin-bottom: 1rem;
-}
-
-.search-input {
-  width: 100%;
-  min-height: 120px;
-  padding: 1rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-family: inherit;
-  resize: vertical;
-  transition: border-color 0.3s;
-  margin-bottom: 1rem;
-}
-
-.search-input:focus {
+.chat-input:focus {
   outline: none;
   border-color: #667eea;
 }
 
-.search-input:disabled {
-  background: #f5f5f5;
+.chat-input:disabled {
+  background: #f9fafb;
   cursor: not-allowed;
 }
 
-.search-button {
-  width: 100%;
-  padding: 1rem 2rem;
+.send-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: 20px;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.search-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
-}
-
-.search-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.loading-text {
+  transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
 }
 
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.send-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Examples */
-.examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.examples-label {
-  color: #666;
-  font-size: 0.9rem;
-  margin-right: 0.5rem;
-}
-
-.example-btn {
-  padding: 0.5rem 1rem;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 20px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.example-btn:hover:not(:disabled) {
-  background: #f5f5f5;
-  border-color: #667eea;
-  color: #667eea;
-}
-
-.example-btn:disabled {
+.send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* Error Message */
-.error-message {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 12px;
-  padding: 1rem;
-  margin-bottom: 2rem;
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
+.spinner {
+  animation: spin 1s linear infinite;
 }
 
-.error-icon {
-  font-size: 1.5rem;
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.error-title {
-  font-weight: 600;
-  color: #856404;
-  margin-bottom: 0.25rem;
-}
-
-.error-detail {
-  color: #856404;
-  font-size: 0.9rem;
-}
-
-.close-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  font-size: 1.2rem;
-  cursor: pointer;
-  color: #856404;
-}
-
-/* Results Section */
-.results-section {
-  display: grid;
-  gap: 2rem;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1.3rem;
-  margin-bottom: 1rem;
-  color: #333;
-}
-
-.icon {
-  font-size: 1.5rem;
-}
-
-/* Explanation Card */
-.explanation-card {
-  background: white;
-  border-radius: 20px;
-  padding: 2rem;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
-}
-
-.explanation-text {
-  color: #555;
-  line-height: 1.6;
-  font-size: 1.05rem;
-  margin-bottom: 1rem;
-}
-
-.meta-info {
-  display: flex;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-}
-
-.meta-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: #888;
-  font-size: 0.9rem;
-}
-
-.meta-icon {
-  font-size: 1rem;
-}
-
-/* Meme Display */
-.meme-display {
-  background: white;
-  border-radius: 20px;
-  padding: 2rem;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
-}
-
-.meme-card {
-  border: 2px solid #f0f0f0;
-  border-radius: 16px;
-  overflow: hidden;
-  transition: transform 0.3s, box-shadow 0.3s;
-}
-
-.meme-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-}
-
-.meme-image-container {
-  background: #f8f8f8;
-  padding: 2rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 300px;
-}
-
-.meme-image {
-  max-width: 100%;
-  max-height: 500px;
-  object-fit: contain;
-  border-radius: 8px;
-}
-
-.meme-actions {
-  display: flex;
-  gap: 0.5rem;
-  padding: 1rem;
-  background: #fafafa;
-  border-top: 1px solid #f0f0f0;
-}
-
-.action-btn {
-  flex: 1;
-  padding: 0.75rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  background: white;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.3rem;
-}
-
-.action-btn:hover {
-  background: #f0f0f0;
-  border-color: #667eea;
-  color: #667eea;
-}
-
-.action-btn span {
-  font-size: 1.1rem;
-}
-
-.no-meme {
-  text-align: center;
-  padding: 3rem;
-  color: #999;
-}
-
-.no-meme-icon {
-  font-size: 4rem;
-  display: block;
-  margin-bottom: 1rem;
-}
-
-/* History Section */
-.history-section {
-  background: white;
-  border-radius: 20px;
-  padding: 2rem;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  background: #f8f8f8;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.history-item:hover {
-  background: #f0f0f0;
-}
-
-.history-query {
-  color: #333;
-  font-weight: 500;
-}
-
-.history-time {
-  color: #999;
-  font-size: 0.85rem;
-}
-
-/* Footer */
-.footer {
-  background: rgba(255, 255, 255, 0.9);
-  padding: 1.5rem;
-  text-align: center;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-/* Responsive */
+/* 响应式 */
 @media (max-width: 768px) {
-  .title {
-    font-size: 2rem;
-  }
-  
-  .emoji {
-    font-size: 2.5rem;
-  }
-  
-  .container {
-    padding: 0 1rem;
-  }
-  
-  .meta-info {
+  .header-content {
     flex-direction: column;
-    gap: 0.5rem;
+    align-items: flex-start;
   }
   
-  .meme-actions {
-    flex-direction: column;
+  .message-bubble {
+    max-width: 85%;
+  }
+  
+  .meme-image {
+    max-width: 100%;
   }
 }
 </style>
-

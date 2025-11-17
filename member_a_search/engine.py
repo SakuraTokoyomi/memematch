@@ -52,6 +52,14 @@ class SearchEngine:
 
     def search_meme_internal(self, query: str, top_k: int, min_score: float) -> dict:
         
+        # 🔍 打印输入参数
+        print(f"\n{'='*60}")
+        print(f"🔍 [search_meme_internal] 输入参数:")
+        print(f"   query: '{query}'")
+        print(f"   top_k: {top_k}")
+        print(f"   min_score: {min_score}")
+        print(f"{'='*60}\n")
+        
         start_time = time.time() 
 
         if not self.image_index or not self.text_index:
@@ -63,12 +71,15 @@ class SearchEngine:
         CONTENT_WEIGHT = 0.25 
 
         # ... (搜索、融合、归一化部分 都是正确的，保持不变) ...
+        print(f"🔎 编码查询并搜索...")
         query_vector_image = self.image_model.encode([query])
         faiss.normalize_L2(query_vector_image)
         D_img, I_img = self.image_index.search(query_vector_image, SEARCH_K)
         query_vector_text = self.text_model.encode([query])
         faiss.normalize_L2(query_vector_text)
         D_txt, I_txt = self.text_index.search(query_vector_text, SEARCH_K)
+        print(f"   - 图像搜索: 找到 {len(I_img[0])} 个候选")
+        print(f"   - 文本搜索: 找到 {len(I_txt[0])} 个候选")
         image_ranks = self._get_ranks((D_img, I_img))
         text_ranks = self._get_ranks((D_txt, I_txt))
         fused_scores = {}
@@ -94,25 +105,35 @@ class SearchEngine:
             fused_normalized_scores[id_val] = min(normalized_score, 1.0)
         
         sorted_results = sorted(fused_normalized_scores.items(), key=lambda item: item[1], reverse=True)
+        print(f"🎯 融合排序完成: 共 {len(sorted_results)} 个结果")
         
         # --- (*** 核心修正：应用你的新规则 ***) ---
         
         # 1. 仍然先按 API 的 min_score 过滤 (通常是 0.0)
         filtered_by_min_score = [(id_val, score) for id_val, score in sorted_results if score >= min_score]
+        print(f"✅ min_score过滤后: {len(filtered_by_min_score)} 个结果 (min_score={min_score})")
         
         # 2. 检查：是否找到了任何结果？
         if not filtered_by_min_score:
-            raise Exception("Search failed: No results found matching min_score") 
+            error_msg = "Search failed: No results found matching min_score"
+            print(f"\n❌ [search_meme_internal] 错误: {error_msg}\n")
+            raise Exception(error_msg) 
 
         # 3. 检查：Top 1 的分数是否达标？ (按你的新要求)
         top_1_score = filtered_by_min_score[0][1]
-        SCORE_THRESHOLD = 0.8 #
+        SCORE_THRESHOLD = 0.5 #
         
         if top_1_score <= SCORE_THRESHOLD:
-            raise Exception(f"Search failed: Top 1 result score ({top_1_score:.4f}) is not > {SCORE_THRESHOLD}")
+            error_msg = f"Search failed: Top 1 result score ({top_1_score:.4f}) is not > {SCORE_THRESHOLD}"
+            print(f"\n❌ [search_meme_internal] 错误: {error_msg}")
+            print(f"   Top-1 score: {top_1_score:.4f}")
+            print(f"   Required: > {SCORE_THRESHOLD}\n")
+            raise Exception(error_msg)
 
         # 4. 如果 Top 1 达标，则搜索成功。我们从这个列表中取 top_k
         final_candidates = filtered_by_min_score[:top_k]
+        print(f"✅ 质量检查通过: Top-1 score = {top_1_score:.4f} > {SCORE_THRESHOLD}")
+        print(f"📋 返回 top-{top_k} 结果")
         
         # --- (*** 修正结束 ***) ---
         
@@ -131,7 +152,7 @@ class SearchEngine:
                 }
             })
         
-        return {
+        result = {
             "success": True,
             "data": {
                 "query": query,
@@ -146,6 +167,22 @@ class SearchEngine:
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")
             }
         }
+        
+        # 📤 打印输出结果
+        print(f"\n{'='*60}")
+        print(f"📤 [search_meme_internal] 输出结果:")
+        print(f"   success: {result['success']}")
+        print(f"   total_results: {result['data']['total']}")
+        print(f"   search_time: {result['metadata']['search_time']:.4f}s")
+        if result['data']['results']:
+            print(f"   Top-1:")
+            top1 = result['data']['results'][0]
+            print(f"      - path: {top1['image_path']}")
+            print(f"      - score: {top1['score']}")
+            print(f"      - tags: {top1['tags']}")
+        print(f"{'='*60}\n")
+        
+        return result
 
 # --- (对外暴露的接口不变) ---
 _engine_instance = None

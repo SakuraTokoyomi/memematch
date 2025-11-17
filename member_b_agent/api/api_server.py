@@ -15,9 +15,13 @@ sys.path.insert(0, parent_dir)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 import logging
+import json
+import asyncio
+from typing import AsyncGenerator
 
 from agent.agent_core import create_agent
 from agent.real_tools import setup_real_tools  # 使用真实搜索引擎
@@ -91,6 +95,12 @@ class QueryResponse(BaseModel):
     source: Optional[str] = None
     session_id: Optional[str] = None
     error: Optional[str] = None
+
+
+class StreamEvent(BaseModel):
+    """流式事件"""
+    type: str  # status, tool_call, result, complete, error
+    data: dict
 
 
 class SessionInfo(BaseModel):
@@ -185,7 +195,7 @@ async def health_check():
 @app.post("/api/query", response_model=QueryResponse)
 async def query_meme(request: QueryRequest):
     """
-    查询梗图接口
+    查询梗图接口（非流式）
     
     支持单次查询和多轮对话
     """
@@ -233,6 +243,92 @@ async def query_meme(request: QueryRequest):
     except Exception as e:
         logger.error(f"查询失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/query/stream")
+async def query_meme_stream(request: QueryRequest):
+    """
+    流式查询梗图接口
+    
+    实时返回Agent的推理过程
+    """
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent 服务未就绪")
+    
+    async def generate_events() -> AsyncGenerator[str, None]:
+        """生成SSE事件流"""
+        try:
+            # 发送开始事件
+            yield f"data: {json.dumps({'type': 'start', 'data': {'query': request.text, 'session_id': request.session_id}}, ensure_ascii=False)}\n\n"
+            
+            logger.info(f"📥 [流式] 收到查询请求: {request.text[:50]}...")
+            
+            # 这里我们需要修改agent_core.py来支持流式输出
+            # 目前先同步执行，然后分步发送结果
+            result = await asyncio.to_thread(
+                agent.process_query,
+                user_query=request.text,
+                max_iterations=request.max_iterations,
+                session_id=request.session_id
+            )
+            
+            # 发送推理步骤
+            if result.get("reasoning_steps"):
+                for step in result["reasoning_steps"]:
+                    event_data = {
+                        'type': 'tool_call',
+                        'data': {
+                            'step': step['step'],
+                            'tool': step['tool'],
+                            'arguments': step['arguments'],
+                            'result': step['result']
+                        }
+                    }
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.1)  # 模拟实时感
+            
+            # 发送最终结果
+            if result.get("status") == "success":
+                final_data = {
+                    'type': 'complete',
+                    'data': {
+                        'success': True,
+                        'meme_path': result.get("meme_path"),
+                        'explanation': result.get("explanation"),
+                        'source': result.get("source"),
+                        'session_id': result.get("session_id")
+                    }
+                }
+                yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+                logger.info(f"✅ [流式] 查询成功: {result.get('meme_path')}")
+            else:
+                error_data = {
+                    'type': 'error',
+                    'data': {
+                        'success': False,
+                        'error': result.get("error", "未知错误"),
+                        'session_id': result.get("session_id")
+                    }
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                logger.warning(f"❌ [流式] 查询失败: {result.get('error')}")
+            
+        except Exception as e:
+            logger.error(f"[流式] 查询失败: {e}", exc_info=True)
+            error_data = {
+                'type': 'error',
+                'data': {'success': False, 'error': str(e)}
+            }
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @app.delete("/api/session/{session_id}", response_model=dict)
