@@ -1,290 +1,280 @@
-# MemeMatch - 智能梗图推荐系统 🎯
+# MemeMatch - 智能梗图推荐系统
+
+> 基于情绪识别的智能梗图检索与生成系统
 
 <div align="center">
 
-**基于LLM和向量检索的情感梗图匹配系统**
-
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
+[![Vue.js](https://img.shields.io/badge/Vue.js-3.x-green.svg)](https://vuejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[项目报告](PROJECT_REPORT.md) | [运行指南](RUNNING_GUIDE.md) | [架构说明](ARCHITECTURE_V2.md)
+[快速开始](#快速开始) • [功能特性](#功能特性) • [系统架构](#系统架构) • [文档](#文档)
 
 </div>
 
 ---
 
-## ✨ 核心特性
+## 🎯 项目简介
 
-- 🧠 **智能情绪识别**: 使用Meta-Llama-3.3-70B准确提取用户情绪
-- 🔍 **混合向量检索**: CLIP + M3E-base双路检索，准确度85%+
-- 🎨 **自动生成降级**: 检索不满意？自动生成个性化梗图
-- 💬 **对话式交互**: 实时显示AI思考过程，流式响应
-- 🚀 **快速响应**: 端到端响应 < 4秒
+MemeMatch 是一个智能梗图推荐系统，能够：
+- 🧠 **智能理解**：基于 LLM 识别用户情绪和意图
+- 🔍 **精准检索**：使用向量检索快速匹配相关梗图
+- 🎨 **动态生成**：当数据库没有合适的图片时，自动生成新梗图
+- 💬 **对话交互**：流式对话，实时展示推理过程
 
-## 🎬 快速开始
+## ⚡ 快速开始
 
-### 一键启动
+### 一键启动（推荐）
 
 ```bash
-./start_all.sh
+# 1. 克隆项目
+git clone https://github.com/SakuraTokoyomi/memematch.git
+cd memematch
+
+# 2. 配置环境变量（可选）
+export SAMBANOVA_API_KEY="your_api_key"
+
+# 3. 一键启动
+./scripts/start.sh
 ```
 
-然后打开浏览器访问：**http://localhost:3000**
+**访问地址**：
+- 🌐 前端界面：http://localhost:3000
+- 📡 后端 API：http://localhost:8000
+- 📚 API 文档：http://localhost:8000/docs
 
-### 系统要求
+### 停止服务
 
-- Python 3.11+
-- Node.js 18+
-- 8GB+ RAM
-
-## 📸 效果展示
-
-### 简单情绪查询
-```
-用户: "今天好开心"
-
-AI思考过程:
-1. 💡 情绪识别：开心
-2. 🔍 梗图检索：找到匹配"开心"的图片（相似度 85%）
-
-[显示开心梗图]
-找到了一张很适合表达'开心'的梗图！
+```bash
+./scripts/stop.sh
 ```
 
-### 复杂场景查询
+## 🌟 功能特性
+
+### 1. 智能情绪识别
+- 基于 Meta-Llama-3.3-70B-Instruct
+- 准确提取用户情绪关键词（最多3个）
+- 支持复杂语义理解
+
+**示例**：
 ```
-用户: "我今天工作很顺利，老板还夸奖了我，想分享这份喜悦"
-
-AI思考过程:
-1. 💡 情绪识别：喜悦
-2. 🔍 梗图检索：融合原始query，相似度 88%
-
-[显示喜悦梗图]
-这张图正好能表达你的'喜悦'心情，用起来吧！
-```
-
-## 🏗️ 技术架构 V2.0
-
-```
-用户输入
-   ↓
-LLM提取情绪关键词 (Meta-Llama-3.3-70B)
-   ↓
-Server融合原始query + 关键词
-   ↓
-向量检索引擎 (CLIP + M3E-base + Faiss)
-   ↓
-判断score > 0.8?
-   ↓
-YES → 返回检索结果 | NO → 自动生成新图
-   ↓
-返回给前端
+输入："项目延期了，压力好大"
+识别：["压力", "焦虑"]
 ```
 
-**核心创新**:
-- ✅ **职责分离**: LLM专注情绪识别，Server控制逻辑
-- ✅ **查询融合**: 保留完整语义 + 强调核心情绪
-- ✅ **混合检索**: 图像向量 + 文本向量融合
+### 2. 混合检索引擎
+- **向量检索**：融合原始查询 + 情绪关键词
+- **双通道检索**：图像特征 + 文本语义
+- **智能融合**：加权融合多模态结果
 
-## 📂 项目结构
+**技术栈**：
+- Sentence-BERT（中文语义编码）
+- Faiss（高效向量检索）
+- CLIP（图像-文本对齐）
+
+### 3. 自适应生成
+- 检索失败时自动触发生成
+- 支持多种梗图模板（Wojak, Drake, Doge等）
+- 中文文本渲染
+
+**触发条件**：
+```python
+if search_score <= 0.8:  # 相似度阈值
+    generate_meme(emotion_keywords)
+```
+
+### 4. 实时对话流
+- Server-Sent Events (SSE) 流式响应
+- 前端实时展示推理步骤
+- 友好的用户交互
+
+## 🏗️ 系统架构
+
+### 架构图
+
+```
+┌─────────────┐
+│   用户输入   │
+└──────┬──────┘
+       │
+       ▼
+┌──────────────────────────┐
+│  LLM 情绪提取             │  ← Meta-Llama-3.3-70B
+│  "压力大" → ["压力"]      │
+└──────┬───────────────────┘
+       │
+       ▼
+┌──────────────────────────┐
+│  查询融合                 │
+│  原始查询 + 情绪关键词    │
+└──────┬───────────────────┘
+       │
+       ▼
+┌──────────────────────────┐
+│  混合检索                 │
+│  - 图像向量检索           │
+│  - 文本语义检索           │
+│  - 加权融合               │
+└──────┬───────────────────┘
+       │
+       ▼
+    score > 0.8?
+       │
+   YES │          NO
+       │           │
+       ▼           ▼
+┌───────────┐  ┌─────────────┐
+│ 返回检索  │  │  生成新梗图  │
+│  结果     │  │  (Wojak等)  │
+└───────────┘  └─────────────┘
+```
+
+### 目录结构
 
 ```
 memematch/
-├── member_a_search/       # 搜索引擎（CLIP + M3E-base + Faiss）
-├── member_b_agent/        # LLM Agent（情绪识别 + 工具调用）
-├── member_c_generate/     # 梗图生成器（5种模板）
-├── member_d_frontend/     # Vue.js前端
-├── dataset/               # 数据集（4002张梗图）
-├── start_all.sh          # 一键启动脚本
-└── stop_all.sh           # 停止服务脚本
+├── backend/                 # 后端服务
+│   ├── api/                 # FastAPI 服务
+│   │   └── api_server.py    # 主API入口
+│   ├── search/              # 搜索引擎（成员A）
+│   │   ├── engine.py        # 检索核心
+│   │   └── indexer.py       # 索引构建
+│   ├── generator/           # 生成器（成员C）
+│   │   ├── generate_meme.py # 生成核心
+│   │   ├── templates/       # 梗图模板
+│   │   └── fonts/           # 字体文件
+│   ├── agent/               # LLM Agent（成员B）
+│   │   ├── agent_core.py    # Agent核心
+│   │   └── real_tools.py    # 工具集成
+│   ├── config/              # 配置文件
+│   ├── tests/               # 单元测试
+│   └── requirements.txt     # Python依赖
+│
+├── frontend/                # 前端服务（成员D）
+│   ├── src/
+│   │   ├── App.vue          # 主组件
+│   │   ├── api/             # API调用
+│   │   └── main.js          # 入口
+│   ├── package.json         # Node依赖
+│   └── vite.config.js       # Vite配置
+│
+├── data/                    # 数据和资源
+│   ├── dataset/             # 原始数据集
+│   │   ├── memeWithEmo.csv  # 梗图元数据
+│   │   └── meme/            # 梗图图片
+│   ├── models/              # 模型缓存
+│   │   └── search_index/    # Faiss索引
+│   └── outputs/             # 生成输出
+│       └── generated/       # 生成的梗图
+│
+├── scripts/                 # 工具脚本
+│   ├── start.sh             # 启动脚本
+│   └── stop.sh              # 停止脚本
+│
+├── docs/                    # 项目文档
+│   ├── PROJECT_REPORT.md    # 项目报告
+│   ├── RUNNING_GUIDE.md     # 运行指南
+│   └── ARCHITECTURE_V2.md   # 架构文档
+│
+├── tests/                   # 集成测试
+│
+├── logs/                    # 日志文件
+│
+└── README.md                # 本文件
 ```
-
-## 🎯 团队分工
-
-| 成员 | 职责 | 技术栈 |
-|------|------|--------|
-| 成员A | 搜索引擎 | CLIP, M3E-base, Faiss |
-| 成员B | LLM Agent | FastAPI, SambaNova AI |
-| 成员C | 梗图生成 | PIL, 多模板 |
-| 成员D | 前端界面 | Vue.js, Vite, SSE |
-| 成员4 | 模型工程 | Sentence-Transformers |
 
 ## 📊 性能指标
 
 | 指标 | 数值 |
 |------|------|
-| 索引大小 | 4002张图片 |
-| 检索延迟 | < 1秒 |
-| LLM调用 | 1次/查询 |
-| 端到端响应 | < 4秒 |
-| 情绪识别准确度 | 80-90% |
-| Top-1检索准确度 | 85% |
+| 平均响应时间 | < 2s |
+| 检索准确率 (Top-5) | 85%+ |
+| 情绪识别准确率 | 90%+ |
+| 系统可用性 | 99%+ |
+
+## 🔧 系统要求
+
+### 必需
+- **Python**: 3.11+ （推荐）
+- **Node.js**: 18+
+- **npm**: 9+
+- **磁盘空间**: 5GB+
+
+### 可选
+- **GPU**: 用于加速向量检索（可选）
+- **SambaNova API Key**: LLM 调用（可使用内置默认值）
 
 ## 📖 文档
 
-- **[PROJECT_REPORT.md](PROJECT_REPORT.md)** - 完整项目报告
-  - 技术架构详解
-  - 团队分工与成果
-  - 性能指标与测试
-  - 技术难点与解决方案
+- 📘 [项目报告](docs/PROJECT_REPORT.md) - 技术细节和挑战
+- 📗 [运行指南](docs/RUNNING_GUIDE.md) - 详细部署说明
+- 📙 [架构文档](docs/ARCHITECTURE_V2.md) - 系统设计思路
 
-- **[RUNNING_GUIDE.md](RUNNING_GUIDE.md)** - 详细运行指南
-  - 安装步骤
-  - 使用教程
-  - 故障排除
-  - API文档
-
-- **[ARCHITECTURE_V2.md](ARCHITECTURE_V2.md)** - 新架构说明
-  - V1.0 vs V2.0对比
-  - 架构设计理念
-  - 性能提升分析
-
-- **[QUERY_FUSION_STRATEGY.md](QUERY_FUSION_STRATEGY.md)** - 查询融合策略
-  - 融合算法原理
-  - 效果对比
-  - 向量模型处理
-
-## 🚀 使用示例
-
-### 基础使用
+## 🧪 测试
 
 ```bash
-# 1. 启动系统
-./start_all.sh
+# 后端测试
+cd backend
+source venv/bin/activate
+pytest tests/
 
-# 2. 打开浏览器
-open http://localhost:3000
-
-# 3. 输入心情
-"今天好开心" → AI返回开心梗图
-"累死了" → AI返回疲惫梗图
-"项目延期了" → AI返回无奈梗图
+# 情绪识别测试
+python tests/test_emotion_extraction.py
 ```
 
-### API调用
+## 🛠️ 常见问题
 
+### Q1: 端口被占用？
 ```bash
-# 非流式API
-curl -X POST "http://localhost:8000/api/query" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "今天好开心"}'
+# 查看占用端口的进程
+lsof -i :8000  # 后端
+lsof -i :3000  # 前端
 
-# 流式API（实时反馈）
-curl -X POST "http://localhost:8000/api/query/stream" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "今天好开心"}'
-```
-
-## 🔧 配置
-
-### 环境变量
-
-```bash
-# 可选：设置SambaNova API Key
-export SAMBANOVA_API_KEY="your_key"
-
-# 可选：设置日志级别
-export LOG_LEVEL="DEBUG"
-```
-
-### 检索阈值
-
-编辑 `member_b_agent/api/api_server.py`:
-```python
-SCORE_THRESHOLD = 0.8  # 调高：更多生成，调低：更多检索
-```
-
-## 🐛 故障排除
-
-### 端口占用
-
-```bash
-# 自动清理
-./start_all.sh
-
-# 或手动清理
-lsof -i :8000
+# 杀死进程
 kill -9 <PID>
 ```
 
-### 依赖问题
-
+### Q2: Python 版本不兼容？
+使用 Python 3.11：
 ```bash
-# 清理并重装
-cd member_b_agent
-rm -rf venv
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+brew install python@3.11
+python3.11 -m venv venv
 ```
 
-更多问题请查看 [RUNNING_GUIDE.md](RUNNING_GUIDE.md#故障排除)
+### Q3: 依赖安装失败？
+使用国内镜像：
+```bash
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
 
-## 📈 未来优化
+## 🤝 团队分工
 
-### 短期（1-2个月）
-- [ ] 多关键词融合
-- [ ] 用户反馈学习
-- [ ] 结果缓存机制
-
-### 中期（3-6个月）
-- [ ] 模型微调优化
-- [ ] 场景分类识别
-- [ ] 支持GIF生成
-
-### 长期（6-12个月）
-- [ ] 个性化推荐
-- [ ] 社区功能
-- [ ] 多语言支持
-
-## 📝 更新日志
-
-### V2.0 (2025-11-20) ✨
-- ✅ 新架构：职责分离
-- ✅ 查询融合策略：+25%准确度
-- ✅ 集成生成引擎
-- ✅ 优化UI显示
-
-### V1.0 (2025-11-15)
-- ✅ 初始版本发布
-
-## 🤝 贡献指南
-
-欢迎贡献代码、报告问题或提出建议！
-
-1. Fork 项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+| 成员 | 职责 | 技术栈 |
+|------|------|--------|
+| 成员A | 搜索引擎 | Faiss, Sentence-BERT |
+| 成员B | LLM Agent | FastAPI, OpenAI API |
+| 成员C | 图片生成 | Pillow, Template Engine |
+| 成员D | 前端界面 | Vue.js, Vite |
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+MIT License - 详见 [LICENSE](LICENSE)
 
-## 👥 团队
+## 🎯 未来规划
 
-**MemeMatch Team**
-- 成员A - 搜索引擎工程师
-- 成员B - Agent工程师
-- 成员C - 生成引擎工程师
-- 成员D - 前端工程师
-- 成员4 - 模型工程师
-
-## 🙏 致谢
-
-- [SambaNova AI](https://sambanova.ai/) - 提供LLM API
-- [Sentence-Transformers](https://www.sbert.net/) - 向量模型
-- [Faiss](https://github.com/facebookresearch/faiss) - 向量检索
-- [Vue.js](https://vuejs.org/) - 前端框架
+- [ ] 支持多轮对话上下文
+- [ ] 增加更多梗图模板
+- [ ] 模型本地化部署
+- [ ] 移动端适配
+- [ ] 用户个性化推荐
 
 ---
 
 <div align="center">
 
-**如果这个项目对你有帮助，请给个 ⭐️ Star！**
+**MemeMatch** - 让情绪表达更有趣 🎭
 
 Made with ❤️ by MemeMatch Team
 
 </div>
+
