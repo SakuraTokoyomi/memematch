@@ -123,7 +123,7 @@ class SearchEngine:
         top_1_score = filtered_by_min_score[0][1]
         SCORE_THRESHOLD = 0.8 #
         
-        if top_1_score <= SCORE_THRESHOLD:
+        if top_1_score < SCORE_THRESHOLD:
             error_msg = f"Search failed: Top 1 result score ({top_1_score:.4f}) is not > {SCORE_THRESHOLD}"
             print(f"\n❌ [search_meme_internal] 错误: {error_msg}")
             print(f"   Top-1 score: {top_1_score:.4f}")

@@ -24,7 +24,7 @@ import asyncio
 from typing import AsyncGenerator
 
 from agent.agent_core import create_agent
-from agent.real_tools import setup_real_tools  # 使用真实搜索引擎
+from agent.real_tools import setup_real_tools, real_search_meme, real_generate_meme  # 使用真实搜索引擎
 from agent.session_manager import SessionManager
 
 
@@ -74,6 +74,36 @@ else:
 
 
 # ============ 辅助函数 ============
+
+def generate_explanation(keywords: list, source: str) -> str:
+    """
+    生成友好的推荐理由
+    
+    Args:
+        keywords: 情绪关键词列表
+        source: 来源 ("search" 或 "generated")
+        
+    Returns:
+        推荐理由文本
+    """
+    keywords_text = "、".join(keywords)
+    
+    if source == "search":
+        templates = [
+            f"找到了一张很适合表达'{keywords_text}'的梗图！希望你喜欢~",
+            f"这张图正好能表达你的'{keywords_text}'心情，用起来吧！",
+            f"看到'{keywords_text}'就想到这张图，分享给你啦！"
+        ]
+    else:  # generated
+        templates = [
+            f"没找到合适的图，专门为你生成了一张'{keywords_text}'主题的梗图！",
+            f"为'{keywords_text}'这个心情特制了一张梗图，希望能让你会心一笑~",
+            f"给你定制了一张'{keywords_text}'主题的图，拿去用吧！"
+        ]
+    
+    # 简单轮换
+    import random
+    return random.choice(templates)
 
 def convert_meme_path_to_url(meme_path: str, source: str = None) -> str:
     """
@@ -255,67 +285,98 @@ async def health_check():
 @app.post("/api/query", response_model=QueryResponse)
 async def query_meme(request: QueryRequest):
     """
-    查询梗图接口（非流式）
+    查询梗图接口（非流式）- 新架构：Server控制流程
     
-    支持单次查询和多轮对话
+    流程：
+    1. LLM提取情绪关键词
+    2. Server调用search_meme
+    3. Server判断结果，决定是否调用generate_meme
+    4. Server生成explanation并返回
     """
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent 服务未就绪")
     
     try:
-        # 调用 Agent
-        logger.info(f"📥 收到查询请求: {request.text[:50]}...")
+        logger.info(f"📥 [新架构] 收到查询请求: {request.text[:50]}...")
         
-        result = agent.process_query(
-            user_query=request.text,
-            max_iterations=request.max_iterations,
-            session_id=request.session_id
-        )
+        # 步骤1: LLM提取情绪关键词
+        logger.info("🔍 步骤1: 提取情绪关键词")
+        keywords = agent.extract_emotion_keywords(request.text)
+        if not keywords:
+            raise HTTPException(status_code=400, detail="无法识别情绪关键词")
         
-        # 🐛 DEBUG: 打印Agent返回的完整结果
-        logger.debug(f"🔍 Agent返回结果: {result}")
+        logger.info(f"✅ 提取关键词: {keywords}")
         
-        # 转换为标准响应格式
-        if result.get("status") == "success":
-            # 转换文件路径为前端可访问的URL
-            meme_path = result.get("meme_path")
-            source = result.get("source")
-            url_path = convert_meme_path_to_url(meme_path, source)
+        # 步骤2: 调用search_meme搜索
+        logger.info(f"🔍 步骤2: 搜索梗图 (query='{keywords[0]}')")
+        search_result = real_search_meme(query=keywords[0], top_k=5, min_score=0.0)
+        
+        meme_path = None
+        source = None
+        score = 0.0
+        
+        # 步骤3: 判断搜索结果
+        if search_result.get("success") and search_result.get("data", {}).get("results"):
+            top_result = search_result["data"]["results"][0]
+            score = top_result["score"]
+            logger.info(f"📊 搜索结果: score={score:.4f}")
             
-            response = QueryResponse(
-                success=True,
-                meme_path=url_path,  # 使用转换后的URL路径
-                explanation=result.get("explanation"),
-                source=source,
-                session_id=result.get("session_id")
-            )
-            
-            # 🐛 DEBUG: 打印API响应
-            logger.debug(f"📤 API响应: success={response.success}, meme_path={response.meme_path}")
-            logger.info(f"✅ 查询成功: {meme_path} -> {url_path}")
-            
-            return response
+            SCORE_THRESHOLD = 0.5
+            if score >= SCORE_THRESHOLD:
+                # 搜索成功
+                meme_path = top_result["image_path"]
+                source = "search"
+                logger.info(f"✅ 搜索成功，使用搜索结果")
+            else:
+                logger.info(f"⚠️  搜索分数不足 ({score:.4f} < {SCORE_THRESHOLD})，调用生成工具")
+                # 调用generate_meme
+                gen_result = real_generate_meme(text=keywords[0], template="wojak")
+                if gen_result.get("success"):
+                    meme_path = gen_result["data"]["image_path"]
+                    source = "generated"
+                    logger.info(f"✅ 生成成功: {meme_path}")
+                else:
+                    raise HTTPException(status_code=500, detail=gen_result.get("error", "生成失败"))
         else:
-            error_msg = result.get("error", "未知错误")
-            logger.warning(f"❌ 查询失败: {error_msg}")
-            
-            return QueryResponse(
-                success=False,
-                error=error_msg,
-                session_id=result.get("session_id")
-            )
+            # 搜索失败，直接生成
+            logger.info(f"⚠️  搜索失败，调用生成工具")
+            gen_result = real_generate_meme(text=keywords[0], template="wojak")
+            if gen_result.get("success"):
+                meme_path = gen_result["data"]["image_path"]
+                source = "generated"
+                logger.info(f"✅ 生成成功: {meme_path}")
+            else:
+                raise HTTPException(status_code=500, detail=gen_result.get("error", "生成失败"))
+        
+        # 步骤4: 生成explanation
+        explanation = generate_explanation(keywords, source)
+        
+        # 转换路径
+        url_path = convert_meme_path_to_url(meme_path, source)
+        
+        logger.info(f"✅ [新架构] 查询成功: {meme_path} -> {url_path}")
+        
+        return QueryResponse(
+            success=True,
+            meme_path=url_path,
+            explanation=explanation,
+            source=source,
+            session_id=request.session_id or "no_session"
+        )
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"查询失败: {e}", exc_info=True)
+        logger.error(f"❌ 请求处理失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/query/stream")
 async def query_meme_stream(request: QueryRequest):
     """
-    流式查询梗图接口
+    流式查询梗图接口 - 新架构：Server控制流程
     
-    实时返回Agent的推理过程
+    实时返回处理步骤
     """
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent 服务未就绪")
@@ -324,71 +385,93 @@ async def query_meme_stream(request: QueryRequest):
         """生成SSE事件流"""
         try:
             # 发送开始事件
-            yield f"data: {json.dumps({'type': 'start', 'data': {'query': request.text, 'session_id': request.session_id}}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'start', 'data': {'query': request.text}}, ensure_ascii=False)}\n\n"
             
             logger.info(f"📥 [流式] 收到查询请求: {request.text[:50]}...")
             
-            # 这里我们需要修改agent_core.py来支持流式输出
-            # 目前先同步执行，然后分步发送结果
-            result = await asyncio.to_thread(
-                agent.process_query,
-                user_query=request.text,
-                max_iterations=request.max_iterations,
-                session_id=request.session_id
-            )
+            # 步骤1: 提取情绪关键词
+            yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 1, 'tool': 'extract_emotion', 'status': 'running'}}, ensure_ascii=False)}\n\n"
             
-            # 发送推理步骤
-            if result.get("reasoning_steps"):
-                for step in result["reasoning_steps"]:
-                    event_data = {
-                        'type': 'tool_call',
-                        'data': {
-                            'step': step['step'],
-                            'tool': step['tool'],
-                            'arguments': step['arguments'],
-                            'result': step['result']
-                        }
-                    }
-                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                    await asyncio.sleep(0.1)  # 模拟实时感
+            keywords = await asyncio.to_thread(agent.extract_emotion_keywords, request.text)
+            if not keywords:
+                error_data = {'type': 'error', 'data': {'error': '无法识别情绪关键词'}}
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                return
+            
+            yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 1, 'tool': 'extract_emotion', 'result': {'keywords': keywords}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+            
+            # 步骤2: 搜索梗图
+            yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': keywords[0]}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
+            
+            search_result = await asyncio.to_thread(real_search_meme, query=keywords[0], top_k=5, min_score=0.0)
+            
+            meme_path = None
+            source = None
+            score = 0.0
+            
+            # 步骤3: 判断搜索结果
+            if search_result.get("success") and search_result.get("data", {}).get("results"):
+                top_result = search_result["data"]["results"][0]
+                score = top_result["score"]
+                
+                SCORE_THRESHOLD = 0.5
+                if score >= SCORE_THRESHOLD:
+                    # 搜索成功
+                    meme_path = top_result["image_path"]
+                    source = "search"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'result': {'score': score, 'found': True}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                else:
+                    # 搜索分数不足，生成梗图
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'result': {'score': score, 'found': False}, 'status': 'low_score'}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
+                    
+                    gen_result = await asyncio.to_thread(real_generate_meme, text=keywords[0], template="wojak")
+                    if gen_result.get("success"):
+                        meme_path = gen_result["data"]["image_path"]
+                        source = "generated"
+                        yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                    else:
+                        error_data = {'type': 'error', 'data': {'error': gen_result.get("error", "生成失败")}}
+                        yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                        return
+            else:
+                # 搜索失败，直接生成
+                yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'result': {'found': False}, 'status': 'failed'}}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
+                
+                gen_result = await asyncio.to_thread(real_generate_meme, text=keywords[0], template="wojak")
+                if gen_result.get("success"):
+                    meme_path = gen_result["data"]["image_path"]
+                    source = "generated"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                else:
+                    error_data = {'type': 'error', 'data': {'error': gen_result.get("error", "生成失败")}}
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    return
+            
+            # 生成explanation
+            explanation = generate_explanation(keywords, source)
+            
+            # 转换路径
+            url_path = convert_meme_path_to_url(meme_path, source)
             
             # 发送最终结果
-            if result.get("status") == "success":
-                # 转换文件路径为前端可访问的URL
-                meme_path = result.get("meme_path")
-                source = result.get("source")
-                url_path = convert_meme_path_to_url(meme_path, source)
-                
-                final_data = {
-                    'type': 'complete',
-                    'data': {
-                        'success': True,
-                        'meme_path': url_path,  # 使用转换后的URL路径
-                        'explanation': result.get("explanation"),
-                        'source': source,
-                        'session_id': result.get("session_id")
-                    }
+            final_data = {
+                'type': 'complete',
+                'data': {
+                    'success': True,
+                    'meme_path': url_path,
+                    'explanation': explanation,
+                    'source': source,
+                    'session_id': request.session_id or "no_session"
                 }
-                yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
-                logger.info(f"✅ [流式] 查询成功: {meme_path} -> {url_path}")
-            else:
-                error_data = {
-                    'type': 'error',
-                    'data': {
-                        'success': False,
-                        'error': result.get("error", "未知错误"),
-                        'session_id': result.get("session_id")
-                    }
-                }
-                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-                logger.warning(f"❌ [流式] 查询失败: {result.get('error')}")
+            }
+            yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+            logger.info(f"✅ [流式] 查询成功: {meme_path} -> {url_path}")
             
         except Exception as e:
-            logger.error(f"[流式] 查询失败: {e}", exc_info=True)
-            error_data = {
-                'type': 'error',
-                'data': {'success': False, 'error': str(e)}
-            }
+            logger.error(f"❌ [流式] 查询失败: {e}", exc_info=True)
+            error_data = {'type': 'error', 'data': {'error': str(e)}}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
     
     return StreamingResponse(

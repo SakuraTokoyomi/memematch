@@ -78,7 +78,7 @@
               <!-- 梗图结果 -->
               <div v-if="message.meme" class="meme-result">
                 <img 
-                  :src="`http://localhost:8000/static/${extractFileName(message.meme.path)}`" 
+                  :src="`http://localhost:8000${message.meme.path}`" 
                   :alt="message.meme.explanation"
                   class="meme-image"
                   @error="handleImageError"
@@ -326,11 +326,6 @@ export default {
       return JSON.stringify(step.arguments)
     },
     
-    extractFileName(path) {
-      if (!path) return ''
-      const parts = path.split('/')
-      return parts[parts.length - 1]
-    },
     
     handleImageError(event) {
       console.error('图片加载失败:', event.target.src)
