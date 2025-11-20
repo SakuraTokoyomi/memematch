@@ -119,20 +119,10 @@ class SearchEngine:
             print(f"\n❌ [search_meme_internal] 错误: {error_msg}\n")
             raise Exception(error_msg) 
 
-        # 3. 检查：Top 1 的分数是否达标？ (按你的新要求)
+        # 3. 新架构：不再在Engine层判断阈值，直接返回结果，让Server端决策
         top_1_score = filtered_by_min_score[0][1]
-        SCORE_THRESHOLD = 0.8 #
-        
-        if top_1_score < SCORE_THRESHOLD:
-            error_msg = f"Search failed: Top 1 result score ({top_1_score:.4f}) is not > {SCORE_THRESHOLD}"
-            print(f"\n❌ [search_meme_internal] 错误: {error_msg}")
-            print(f"   Top-1 score: {top_1_score:.4f}")
-            print(f"   Required: > {SCORE_THRESHOLD}\n")
-            raise Exception(error_msg)
-
-        # 4. 如果 Top 1 达标，则搜索成功。我们从这个列表中取 top_k
         final_candidates = filtered_by_min_score[:top_k]
-        print(f"✅ 质量检查通过: Top-1 score = {top_1_score:.4f} > {SCORE_THRESHOLD}")
+        print(f"✅ 搜索完成: Top-1 score = {top_1_score:.4f}")
         print(f"📋 返回 top-{top_k} 结果")
         
         # --- (*** 修正结束 ***) ---

@@ -307,9 +307,14 @@ async def query_meme(request: QueryRequest):
         
         logger.info(f"✅ 提取关键词: {keywords}")
         
-        # 步骤2: 调用search_meme搜索
-        logger.info(f"🔍 步骤2: 搜索梗图 (query='{keywords[0]}')")
-        search_result = real_search_meme(query=keywords[0], top_k=5, min_score=0.0)
+        # 步骤2: 调用search_meme搜索（融合原始query和情绪关键词）
+        # 融合策略：原始query包含更完整的语义，情绪关键词提供核心焦点
+        search_query = f"{request.text} {keywords[0]}" if len(request.text) > len(keywords[0]) * 2 else keywords[0]
+        logger.info(f"🔍 步骤2: 搜索梗图")
+        logger.debug(f"   原始输入: '{request.text}'")
+        logger.debug(f"   情绪关键词: '{keywords[0]}'")
+        logger.debug(f"   融合查询: '{search_query}'")
+        search_result = real_search_meme(query=search_query, top_k=5, min_score=0.0)
         
         meme_path = None
         source = None
@@ -321,8 +326,8 @@ async def query_meme(request: QueryRequest):
             score = top_result["score"]
             logger.info(f"📊 搜索结果: score={score:.4f}")
             
-            SCORE_THRESHOLD = 0.5
-            if score >= SCORE_THRESHOLD:
+            SCORE_THRESHOLD = 0.8  # 匹配度阈值
+            if score > SCORE_THRESHOLD:
                 # 搜索成功
                 meme_path = top_result["image_path"]
                 source = "search"
@@ -400,10 +405,13 @@ async def query_meme_stream(request: QueryRequest):
             
             yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 1, 'tool': 'extract_emotion', 'result': {'keywords': keywords}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
             
-            # 步骤2: 搜索梗图
-            yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': keywords[0]}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
+            # 步骤2: 搜索梗图（融合原始query和情绪关键词）
+            search_query = f"{request.text} {keywords[0]}" if len(request.text) > len(keywords[0]) * 2 else keywords[0]
+            logger.debug(f"🔍 [流式] 融合查询: 原始='{request.text}', 关键词='{keywords[0]}', 融合='{search_query}'")
             
-            search_result = await asyncio.to_thread(real_search_meme, query=keywords[0], top_k=5, min_score=0.0)
+            yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
+            
+            search_result = await asyncio.to_thread(real_search_meme, query=search_query, top_k=5, min_score=0.0)
             
             meme_path = None
             source = None
@@ -414,7 +422,7 @@ async def query_meme_stream(request: QueryRequest):
                 top_result = search_result["data"]["results"][0]
                 score = top_result["score"]
                 
-                SCORE_THRESHOLD = 0.5
+                SCORE_THRESHOLD = 0.8  # 匹配度阈值
                 if score >= SCORE_THRESHOLD:
                     # 搜索成功
                     meme_path = top_result["image_path"]

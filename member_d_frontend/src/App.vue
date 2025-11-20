@@ -68,9 +68,9 @@
             <div class="message-bubble ai-bubble">
               <!-- 推理过程 -->
               <div v-if="message.reasoning && message.reasoning.length > 0" class="reasoning-process">
-                <div class="reasoning-header">🔄 推理过程</div>
+                <div class="reasoning-header">💭 思考过程</div>
                 <div v-for="(step, idx) in message.reasoning" :key="idx" class="reasoning-step">
-                  <span class="step-badge">{{ step.tool }}</span>
+                  <span class="step-number">{{ idx + 1 }}.</span>
                   <span class="step-text">{{ formatStepText(step) }}</span>
                 </div>
               </div>
@@ -105,6 +105,16 @@
           <div v-else-if="message.type === 'loading'" class="message message-assistant">
             <div class="message-avatar ai-avatar">🤖</div>
             <div class="message-bubble ai-bubble">
+              <!-- 推理过程（实时更新） -->
+              <div v-if="message.reasoning && message.reasoning.length > 0" class="reasoning-process">
+                <div class="reasoning-header">💭 思考过程</div>
+                <div v-for="(step, idx) in message.reasoning" :key="idx" class="reasoning-step">
+                  <span class="step-number">{{ idx + 1 }}.</span>
+                  <span class="step-text">{{ formatStepText(step) }}</span>
+                </div>
+              </div>
+              
+              <!-- 加载指示器 -->
               <div class="typing-indicator">
                 <span></span>
                 <span></span>
@@ -226,50 +236,69 @@ export default {
         },
         onToolCall: (data) => {
           console.log('工具调用:', data)
-          this.currentReasoning.push(data)
-          // 更新最后一条消息（移除loading，添加推理过程）
-          const lastMessage = this.messages[this.messages.length - 1]
-          if (lastMessage.type === 'loading') {
-            lastMessage.type = 'assistant'
-            lastMessage.reasoning = [...this.currentReasoning]
+          
+          // 只保留最终结果（status为success/failed/low_score），过滤掉running状态
+          if (data.status !== 'running') {
+            this.currentReasoning.push(data)
+            // 实时更新推理过程（但不改变消息类型）
+            const lastMessage = this.messages[this.messages.length - 1]
+            if (lastMessage && (lastMessage.type === 'loading' || lastMessage.type === 'assistant')) {
+              lastMessage.reasoning = [...this.currentReasoning]
+            }
+            this.$nextTick(() => {
+              this.scrollToBottom()
+            })
           }
-          this.$nextTick(() => {
-            this.scrollToBottom()
-          })
         },
         onComplete: (data) => {
           console.log('查询完成:', data)
           this.loading = false
           
-          // 移除loading消息
-          const loadingIndex = this.messages.findIndex(m => m.type === 'loading')
-          if (loadingIndex !== -1) {
-            this.messages.splice(loadingIndex, 1)
-          }
+          // 查找loading消息或已转换的assistant消息
+          const lastMessage = this.messages[this.messages.length - 1]
           
-          // 添加AI回复
           if (data.success) {
-            this.messages.push({
-              type: 'assistant',
-              reasoning: this.currentReasoning,
-              meme: {
+            // 更新现有消息，而不是创建新消息
+            if (lastMessage && (lastMessage.type === 'loading' || lastMessage.type === 'assistant')) {
+              lastMessage.type = 'assistant'
+              lastMessage.reasoning = this.currentReasoning
+              lastMessage.meme = {
                 path: data.meme_path,
                 explanation: data.explanation,
                 source: data.source
-              },
-              timestamp: Date.now()
-            })
+              }
+              lastMessage.timestamp = Date.now()
+            } else {
+              // 降级：如果找不到消息，创建新的
+              this.messages.push({
+                type: 'assistant',
+                reasoning: this.currentReasoning,
+                meme: {
+                  path: data.meme_path,
+                  explanation: data.explanation,
+                  source: data.source
+                },
+                timestamp: Date.now()
+              })
+            }
             
             this.sessionId = data.session_id || this.sessionId
             if (data.session_id) {
               localStorage.setItem('meme_session_id', data.session_id)
             }
           } else {
-            this.messages.push({
-              type: 'assistant',
-              error: data.error || '查询失败',
-              timestamp: Date.now()
-            })
+            // 错误情况：更新或创建错误消息
+            if (lastMessage && (lastMessage.type === 'loading' || lastMessage.type === 'assistant')) {
+              lastMessage.type = 'assistant'
+              lastMessage.error = data.error || '查询失败'
+              lastMessage.timestamp = Date.now()
+            } else {
+              this.messages.push({
+                type: 'assistant',
+                error: data.error || '查询失败',
+                timestamp: Date.now()
+              })
+            }
           }
           
           // 保存消息到localStorage
@@ -315,15 +344,31 @@ export default {
     },
     
     formatStepText(step) {
-      if (step.tool === 'search_meme') {
+      // 新架构的格式化逻辑
+      if (step.tool === 'extract_emotion') {
+        const keywords = step.result?.keywords || []
+        return `💡 情绪识别：${keywords.join('、')}`
+      } else if (step.tool === 'search_meme') {
         const query = step.arguments?.query || ''
-        const total = step.result?.data?.total || 0
-        return `搜索"${query}" → 找到 ${total} 个结果`
-      } else if (step.tool === 'classify_sentiment') {
-        const emotion = step.result?.emotion || ''
-        return `分析情绪 → ${emotion}`
+        if (step.status === 'success') {
+          const score = step.result?.score || 0
+          return `🔍 梗图检索：找到匹配"${query}"的图片（相似度 ${(score * 100).toFixed(0)}%）`
+        } else if (step.status === 'low_score') {
+          const score = step.result?.score || 0
+          return `⚠️ 检索结果：匹配度不足（${(score * 100).toFixed(0)}%），准备生成新图`
+        } else if (step.status === 'failed') {
+          return `❌ 检索失败：未找到"${query}"相关图片，准备生成新图`
+        }
+      } else if (step.tool === 'generate_meme') {
+        const text = step.arguments?.text || ''
+        const template = step.arguments?.template || 'wojak'
+        if (step.status === 'success') {
+          return `✨ 图片生成：已生成"${text}"主题梗图（模板：${template}）`
+        }
       }
-      return JSON.stringify(step.arguments)
+      
+      // 降级：返回工具名
+      return `${step.tool} (${step.status})`
     },
     
     
@@ -589,17 +634,17 @@ export default {
   font-size: 13px;
 }
 
-.step-badge {
-  padding: 3px 8px;
-  background: #e0e7ff;
+.step-number {
+  min-width: 20px;
+  font-weight: 700;
   color: #667eea;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 13px;
 }
 
 .step-text {
-  color: #666;
+  color: #374151;
+  flex: 1;
+  line-height: 1.6;
 }
 
 /* 梗图结果 */
