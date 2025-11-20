@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 search_module_path = os.path.join(project_root, 'member_a_search')
+generate_module_path = os.path.join(project_root, 'member_c_generate')
 
 if search_module_path not in sys.path:
     sys.path.insert(0, search_module_path)
+if generate_module_path not in sys.path:
+    sys.path.insert(0, generate_module_path)
 
 # 导入成员A的搜索引擎
 try:
@@ -29,6 +32,17 @@ except ImportError as e:
     print(f"   搜索路径: {search_module_path}")
     REAL_SEARCH_AVAILABLE = False
     search_meme_real = None
+
+# 导入成员C的Meme生成器
+try:
+    from generate_meme import generate_meme as generate_meme_real
+    REAL_GENERATE_AVAILABLE = True
+    print("✅ 成员C的Meme生成器已成功导入")
+except ImportError as e:
+    print(f"⚠️  无法导入成员C的Meme生成器: {e}")
+    print(f"   生成器路径: {generate_module_path}")
+    REAL_GENERATE_AVAILABLE = False
+    generate_meme_real = None
 
 
 def real_search_meme(query: str, top_k: int = 5, min_score: float = 0.0, **kwargs) -> Dict[str, Any]:
@@ -96,26 +110,78 @@ def real_search_meme(query: str, top_k: int = 5, min_score: float = 0.0, **kwarg
 
 def real_generate_meme(text: str, template: str = "drake", options: Dict = None, **kwargs) -> Dict[str, Any]:
     """
-    成员C的真实Meme生成接口（待集成）
+    成员C的真实Meme生成接口
     
     Args:
         text: 要显示在 meme 上的文字
-        template: 模板类型
-        options: 生成选项
+        template: 模板类型 (drake/doge/wojak)
+        options: 生成选项（字体、颜色等）
         
     Returns:
         {
             "success": bool,
-            "data": {...},
+            "data": {
+                "image_path": str,  # 相对路径
+                "template": str,
+                "text": str,
+                ...
+            },
             "metadata": {...}
         }
     """
-    # TODO: 等待成员C提供实现
-    return {
-        "success": False,
-        "error": "Generate meme not yet implemented by member C",
-        "error_code": "NOT_IMPLEMENTED"
-    }
+    logger.debug(f"🎨 [real_generate_meme] 收到请求: text='{text}', template='{template}'")
+    
+    if not REAL_GENERATE_AVAILABLE:
+        logger.error(f"❌ [real_generate_meme] 生成器不可用")
+        return {
+            "success": False,
+            "error": "Meme generator not available",
+            "error_code": "GENERATOR_NOT_LOADED"
+        }
+    
+    try:
+        # 保存当前工作目录
+        original_cwd = os.getcwd()
+        
+        # 切换到member_c_generate目录（因为生成器依赖相对路径）
+        os.chdir(generate_module_path)
+        
+        try:
+            # 调用成员C的真实生成器
+            logger.debug(f"⚙️  [real_generate_meme] 调用成员C生成器...")
+            result = generate_meme_real(text=text, template=template, options=options)
+            
+            # 成功时，转换路径为相对于项目根目录的路径
+            if result.get("success"):
+                # 生成的图片路径是相对于member_c_generate的
+                # 例如: outputs/generated_drake_xxx.png
+                relative_path = result["data"]["image_path"]
+                
+                # 转换为相对于项目根目录的路径
+                # member_c_generate/outputs/generated_drake_xxx.png
+                project_relative_path = os.path.join("member_c_generate", relative_path)
+                result["data"]["image_path"] = project_relative_path
+                
+                logger.info(f"✅ [real_generate_meme] 生成成功: {project_relative_path}")
+                logger.debug(f"   模板: {template}, 耗时: {result['metadata']['generation_time']}s")
+            else:
+                logger.warning(f"⚠️  [real_generate_meme] 生成返回失败: {result.get('error')}")
+            
+            logger.debug(f"📦 [real_generate_meme] 返回结果: {str(result)[:200]}...")
+            
+            return result
+            
+        finally:
+            # 恢复原始工作目录
+            os.chdir(original_cwd)
+        
+    except Exception as e:
+        logger.error(f"❌ [real_generate_meme] 异常: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "error_code": "REAL_GENERATE_ERROR"
+        }
 
 
 def setup_real_tools(agent):
@@ -125,6 +191,7 @@ def setup_real_tools(agent):
     Args:
         agent: MemeAgent实例
     """
+    # 注册搜索工具（成员A）
     if REAL_SEARCH_AVAILABLE:
         agent.register_tool("search_meme", real_search_meme)
         print("✅ 真实搜索工具已注册（成员A）")
@@ -134,10 +201,15 @@ def setup_real_tools(agent):
         agent.register_tool("search_meme", mock_search_meme)
         print("✅ Mock搜索工具已注册（降级模式）")
     
-    # 生成工具暂时使用mock
-    from .tools import mock_generate_meme
-    agent.register_tool("generate_meme", mock_generate_meme)
-    print("⚠️  生成工具使用Mock版本（等待成员C集成）")
+    # 注册生成工具（成员C）
+    if REAL_GENERATE_AVAILABLE:
+        agent.register_tool("generate_meme", real_generate_meme)
+        print("✅ 真实生成工具已注册（成员C）")
+    else:
+        print("⚠️  Meme生成器不可用，将使用mock版本")
+        from .tools import mock_generate_meme
+        agent.register_tool("generate_meme", mock_generate_meme)
+        print("✅ Mock生成工具已注册（降级模式）")
 
 
 def test_real_search():

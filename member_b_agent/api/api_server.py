@@ -54,13 +54,73 @@ app.add_middleware(
 )
 
 # 配置静态文件服务 - 提供图片访问
-# 将 dataset/meme 目录映射到 /static/ 路径
+
+# 1. 数据集图片（成员A搜索的结果）
 MEME_IMAGE_DIR = os.path.join(os.path.dirname(parent_dir), 'dataset', 'meme')
 if os.path.exists(MEME_IMAGE_DIR):
     app.mount("/static", StaticFiles(directory=MEME_IMAGE_DIR), name="static")
     logger.info(f"✅ 静态文件服务已配置: {MEME_IMAGE_DIR} -> /static/")
 else:
     logger.warning(f"⚠️  图片目录不存在: {MEME_IMAGE_DIR}")
+
+# 2. 生成的图片（成员C生成的结果）
+GENERATED_IMAGE_DIR = os.path.join(os.path.dirname(parent_dir), 'member_c_generate', 'outputs')
+if os.path.exists(GENERATED_IMAGE_DIR):
+    app.mount("/generated", StaticFiles(directory=GENERATED_IMAGE_DIR), name="generated")
+    logger.info(f"✅ 生成图片服务已配置: {GENERATED_IMAGE_DIR} -> /generated/")
+else:
+    logger.warning(f"⚠️  生成图片目录不存在: {GENERATED_IMAGE_DIR}，将自动创建")
+    os.makedirs(GENERATED_IMAGE_DIR, exist_ok=True)
+
+
+# ============ 辅助函数 ============
+
+def convert_meme_path_to_url(meme_path: str, source: str = None) -> str:
+    """
+    将文件系统路径转换为前端可访问的URL路径
+    
+    Args:
+        meme_path: 文件系统路径
+        source: 来源 ("search" 或 "generated")
+        
+    Returns:
+        前端可访问的URL路径
+    """
+    if not meme_path:
+        return meme_path
+    
+    # 规范化路径分隔符
+    meme_path = meme_path.replace('\\', '/')
+    
+    # 根据来源转换路径
+    if source == "generated" or "member_c_generate" in meme_path:
+        # 生成的图片：member_c_generate/outputs/xxx.png -> /generated/xxx.png
+        if "outputs/" in meme_path:
+            filename = meme_path.split("outputs/")[-1]
+            return f"/generated/{filename}"
+        elif "member_c_generate/" in meme_path:
+            filename = meme_path.split("member_c_generate/")[-1]
+            if filename.startswith("outputs/"):
+                filename = filename[8:]  # 去掉 "outputs/"
+            return f"/generated/{filename}"
+    
+    # 搜索的图片：dataset/meme/xxx.jpg -> /static/xxx.jpg
+    if "dataset/meme/" in meme_path:
+        filename = meme_path.split("dataset/meme/")[-1]
+        return f"/static/{filename}"
+    elif meme_path.startswith("meme/"):
+        filename = meme_path[5:]  # 去掉 "meme/"
+        return f"/static/{filename}"
+    
+    # 兜底：如果只是文件名，根据来源推断
+    if "/" not in meme_path:
+        if source == "generated":
+            return f"/generated/{meme_path}"
+        else:
+            return f"/static/{meme_path}"
+    
+    # 其他情况：保持原样
+    return meme_path
 
 
 # ============ 全局变量 ============
@@ -217,17 +277,22 @@ async def query_meme(request: QueryRequest):
         
         # 转换为标准响应格式
         if result.get("status") == "success":
+            # 转换文件路径为前端可访问的URL
+            meme_path = result.get("meme_path")
+            source = result.get("source")
+            url_path = convert_meme_path_to_url(meme_path, source)
+            
             response = QueryResponse(
                 success=True,
-                meme_path=result.get("meme_path"),
+                meme_path=url_path,  # 使用转换后的URL路径
                 explanation=result.get("explanation"),
-                source=result.get("source"),
+                source=source,
                 session_id=result.get("session_id")
             )
             
             # 🐛 DEBUG: 打印API响应
             logger.debug(f"📤 API响应: success={response.success}, meme_path={response.meme_path}")
-            logger.info(f"✅ 查询成功: {response.meme_path}")
+            logger.info(f"✅ 查询成功: {meme_path} -> {url_path}")
             
             return response
         else:
@@ -289,18 +354,23 @@ async def query_meme_stream(request: QueryRequest):
             
             # 发送最终结果
             if result.get("status") == "success":
+                # 转换文件路径为前端可访问的URL
+                meme_path = result.get("meme_path")
+                source = result.get("source")
+                url_path = convert_meme_path_to_url(meme_path, source)
+                
                 final_data = {
                     'type': 'complete',
                     'data': {
                         'success': True,
-                        'meme_path': result.get("meme_path"),
+                        'meme_path': url_path,  # 使用转换后的URL路径
                         'explanation': result.get("explanation"),
-                        'source': result.get("source"),
+                        'source': source,
                         'session_id': result.get("session_id")
                     }
                 }
                 yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
-                logger.info(f"✅ [流式] 查询成功: {result.get('meme_path')}")
+                logger.info(f"✅ [流式] 查询成功: {meme_path} -> {url_path}")
             else:
                 error_data = {
                     'type': 'error',

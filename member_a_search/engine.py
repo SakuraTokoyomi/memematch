@@ -121,7 +121,7 @@ class SearchEngine:
 
         # 3. 检查：Top 1 的分数是否达标？ (按你的新要求)
         top_1_score = filtered_by_min_score[0][1]
-        SCORE_THRESHOLD = 0.5 #
+        SCORE_THRESHOLD = 0.8 #
         
         if top_1_score <= SCORE_THRESHOLD:
             error_msg = f"Search failed: Top 1 result score ({top_1_score:.4f}) is not > {SCORE_THRESHOLD}"
