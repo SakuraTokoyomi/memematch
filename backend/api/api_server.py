@@ -441,31 +441,31 @@ async def query_meme_stream(request: QueryRequest):
                     # 搜索成功
                     meme_path = top_result["image_path"]
                     source = "search"
-                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'result': {'score': score, 'found': True}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'score': score, 'found': True}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                 else:
                     # 搜索分数不足，生成梗图
-                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'result': {'score': score, 'found': False}, 'status': 'low_score'}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'score': score, 'found': False}, 'status': 'low_score'}}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
                     
                     gen_result = await asyncio.to_thread(real_generate_meme, text=keywords[0], template="wojak")
                     if gen_result.get("success"):
                         meme_path = gen_result["data"]["image_path"]
                         source = "generated"
-                        yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                     else:
                         error_data = {'type': 'error', 'data': {'error': gen_result.get("error", "生成失败")}}
                         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
                         return
             else:
                 # 搜索失败，直接生成
-                yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'result': {'found': False}, 'status': 'failed'}}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'found': False}, 'status': 'failed'}}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
                 
                 gen_result = await asyncio.to_thread(real_generate_meme, text=keywords[0], template="wojak")
                 if gen_result.get("success"):
                     meme_path = gen_result["data"]["image_path"]
                     source = "generated"
-                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                 else:
                     error_data = {'type': 'error', 'data': {'error': gen_result.get("error", "生成失败")}}
                     yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
