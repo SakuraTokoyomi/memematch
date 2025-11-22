@@ -425,23 +425,24 @@ async def query_meme_stream(request: QueryRequest):
             
             yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'status': 'running'}}, ensure_ascii=False)}\n\n"
             
-            search_result = await asyncio.to_thread(real_search_meme, query=search_query, top_k=5, min_score=0.0)
+            search_result = await asyncio.to_thread(real_search_meme, query=search_query, top_k=3, min_score=0.0)
             
-            meme_path = None
+            meme_paths = []  # 改为列表存储多张图片
             source = None
             score = 0.0
             
             # 步骤3: 判断搜索结果
             if search_result.get("success") and search_result.get("data", {}).get("results"):
-                top_result = search_result["data"]["results"][0]
+                results = search_result["data"]["results"]
+                top_result = results[0]
                 score = top_result["score"]
                 
                 SCORE_THRESHOLD = 0.8  # 匹配度阈值
                 if score >= SCORE_THRESHOLD:
-                    # 搜索成功
-                    meme_path = top_result["image_path"]
+                    # 搜索成功 - 返回 top3
+                    meme_paths = [result["image_path"] for result in results[:3]]
                     source = "search"
-                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'score': score, 'found': True}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'score': score, 'found': True, 'count': len(meme_paths)}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                 else:
                     # 搜索分数不足，生成梗图
                     yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'score': score, 'found': False}, 'status': 'low_score'}}, ensure_ascii=False)}\n\n"
@@ -449,9 +450,9 @@ async def query_meme_stream(request: QueryRequest):
                     
                     gen_result = await asyncio.to_thread(real_generate_meme, text=keywords[0], template="wojak")
                     if gen_result.get("success"):
-                        meme_path = gen_result["data"]["image_path"]
+                        meme_paths = [gen_result["data"]["image_path"]]  # 生成的只有一张
                         source = "generated"
-                        yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'result': {'path': meme_paths[0]}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                     else:
                         error_data = {'type': 'error', 'data': {'error': gen_result.get("error", "生成失败")}}
                         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
@@ -463,9 +464,9 @@ async def query_meme_stream(request: QueryRequest):
                 
                 gen_result = await asyncio.to_thread(real_generate_meme, text=keywords[0], template="wojak")
                 if gen_result.get("success"):
-                    meme_path = gen_result["data"]["image_path"]
+                    meme_paths = [gen_result["data"]["image_path"]]  # 生成的只有一张
                     source = "generated"
-                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'result': {'path': meme_path}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 3, 'tool': 'generate_meme', 'arguments': {'text': keywords[0], 'template': 'wojak'}, 'result': {'path': meme_paths[0]}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                 else:
                     error_data = {'type': 'error', 'data': {'error': gen_result.get("error", "生成失败")}}
                     yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
@@ -474,22 +475,23 @@ async def query_meme_stream(request: QueryRequest):
             # 生成explanation
             explanation = generate_explanation(keywords, source)
             
-            # 转换路径
-            url_path = convert_meme_path_to_url(meme_path, source)
+            # 转换路径（支持多张图片）
+            url_paths = [convert_meme_path_to_url(path, source) for path in meme_paths]
             
             # 发送最终结果
             final_data = {
                 'type': 'complete',
                 'data': {
                     'success': True,
-                    'meme_path': url_path,
+                    'meme_paths': url_paths,  # 改为复数，支持多张图片
                     'explanation': explanation,
                     'source': source,
+                    'count': len(url_paths),
                     'session_id': request.session_id or "no_session"
                 }
             }
             yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
-            logger.info(f"✅ [流式] 查询成功: {meme_path} -> {url_path}")
+            logger.info(f"✅ [流式] 查询成功: 返回 {len(url_paths)} 张图片")
             
         except Exception as e:
             logger.error(f"❌ [流式] 查询失败: {e}", exc_info=True)

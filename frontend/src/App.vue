@@ -75,19 +75,34 @@
                 </div>
               </div>
 
-              <!-- 梗图结果 -->
+              <!-- 梗图结果（支持多张） -->
               <div v-if="message.meme" class="meme-result">
-                <img 
-                  :src="`http://localhost:8000${message.meme.path}`" 
-                  :alt="message.meme.explanation"
-                  class="meme-image"
-                  @error="handleImageError"
-                />
+                <!-- 图片网格 -->
+                <div class="meme-images-grid" :class="{'single-image': message.meme.count === 1, 'multiple-images': message.meme.count > 1}">
+                  <div 
+                    v-for="(path, idx) in message.meme.paths" 
+                    :key="idx" 
+                    class="meme-image-item"
+                  >
+                    <img 
+                      :src="`http://localhost:8000${path}`" 
+                      :alt="`梗图 ${idx + 1}`"
+                      class="meme-image"
+                      @error="handleImageError"
+                    />
+                    <div v-if="message.meme.count > 1" class="image-index">{{ idx + 1 }}</div>
+                  </div>
+                </div>
+                
+                <!-- 说明文字 -->
                 <div class="meme-explanation">
                   {{ message.meme.explanation }}
                 </div>
+                
+                <!-- 来源标识 -->
                 <div class="meme-source">
                   <span class="source-badge">{{ message.meme.source === 'search' ? '📚 检索' : '✨ 生成' }}</span>
+                  <span v-if="message.meme.count > 1" class="count-badge">共 {{ message.meme.count }} 张</span>
                 </div>
               </div>
 
@@ -263,9 +278,10 @@ export default {
               lastMessage.type = 'assistant'
               lastMessage.reasoning = this.currentReasoning
               lastMessage.meme = {
-                path: data.meme_path,
+                paths: data.meme_paths,  // 改为复数，支持多张图片
                 explanation: data.explanation,
-                source: data.source
+                source: data.source,
+                count: data.count || 1
               }
               lastMessage.timestamp = Date.now()
             } else {
@@ -274,9 +290,10 @@ export default {
                 type: 'assistant',
                 reasoning: this.currentReasoning,
                 meme: {
-                  path: data.meme_path,
+                  paths: data.meme_paths,  // 改为复数
                   explanation: data.explanation,
-                  source: data.source
+                  source: data.source,
+                  count: data.count || 1
                 },
                 timestamp: Date.now()
               })
@@ -652,11 +669,56 @@ export default {
   margin-top: 8px;
 }
 
+/* 多图片网格布局 */
+.meme-images-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.meme-images-grid.single-image {
+  grid-template-columns: 1fr;
+  max-width: 400px;
+}
+
+.meme-images-grid.multiple-images {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  max-width: 600px;
+}
+
+.meme-image-item {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.meme-image-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
 .meme-image {
   width: 100%;
-  max-width: 400px;
-  border-radius: 12px;
-  margin-bottom: 12px;
+  height: auto;
+  display: block;
+}
+
+.image-index {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.7);
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .meme-explanation {
@@ -670,7 +732,10 @@ export default {
 }
 
 .meme-source {
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
 }
 
 .source-badge {
@@ -680,6 +745,16 @@ export default {
   color: #1e40af;
   border-radius: 12px;
   font-size: 12px;
+}
+
+.count-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #d1fae5;
+  color: #065f46;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* 错误消息 */
