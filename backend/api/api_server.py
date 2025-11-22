@@ -189,6 +189,20 @@ class QueryRequest(BaseModel):
         }
 
 
+class GenerateRequest(BaseModel):
+    """创意生成请求"""
+    query: str  # 原始查询
+    keywords: list  # 情绪关键词
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "我今天太开心了",
+                "keywords": ["开心"]
+            }
+        }
+
+
 class QueryResponse(BaseModel):
     """查询响应"""
     success: bool
@@ -440,7 +454,7 @@ async def query_meme_stream(request: QueryRequest):
                 SCORE_THRESHOLD = 0.8  # 匹配度阈值
                 if score >= SCORE_THRESHOLD:
                     # 搜索成功 - 返回 top3
-                    meme_paths = [result["image_path"] for result in results[:3]]
+                    meme_paths = [result["image_path"] for result in results[:2]]
                     source = "search"
                     yield f"data: {json.dumps({'type': 'tool_call', 'data': {'step': 2, 'tool': 'search_meme', 'arguments': {'query': search_query}, 'result': {'score': score, 'found': True, 'count': len(meme_paths)}, 'status': 'success'}}, ensure_ascii=False)}\n\n"
                 else:
@@ -506,6 +520,70 @@ async def query_meme_stream(request: QueryRequest):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@app.post("/api/generate", response_model=QueryResponse)
+async def generate_creative_meme(request: GenerateRequest):
+    """
+    创意生成接口 - 基于用户查询和情绪关键词生成创意梗图
+    
+    流程：
+    1. LLM根据查询和情绪生成创意文案
+    2. 随机选择模板（doge/drake/wojak）
+    3. 调用生成接口
+    """
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent 服务未就绪")
+    
+    try:
+        logger.info(f"🎨 [创意生成] 收到请求: query='{request.query}', keywords={request.keywords}")
+        
+        # 步骤1: LLM生成创意文案
+        creative_text = await asyncio.to_thread(
+            agent._generate_creative_text,
+            request.query,
+            request.keywords
+        )
+        logger.info(f"✨ [创意生成] LLM生成文案: '{creative_text}'")
+        
+        # 步骤2: 随机选择模板
+        import random
+        templates = ["doge", "drake", "wojak"]
+        selected_template = random.choice(templates)
+        logger.info(f"🎲 [创意生成] 随机选择模板: {selected_template}")
+        
+        # 步骤3: 调用生成接口
+        gen_result = await asyncio.to_thread(
+            real_generate_meme,
+            text=creative_text,
+            template=selected_template
+        )
+        
+        if gen_result.get("success"):
+            meme_path = gen_result["data"]["image_path"]
+            url_path = convert_meme_path_to_url(meme_path, "generated")
+            
+            explanation = f"基于'{request.keywords[0]}'创作的{selected_template}风格梗图，文案：{creative_text}"
+            
+            logger.info(f"✅ [创意生成] 成功: {url_path}")
+            
+            return QueryResponse(
+                success=True,
+                meme_path=url_path,
+                explanation=explanation,
+                source="generated"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=gen_result.get("error", "生成失败")
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [创意生成] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/session/{session_id}", response_model=dict)

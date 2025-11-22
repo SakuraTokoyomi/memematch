@@ -173,6 +173,69 @@ class MemeAgent:
             # 降级：直接使用用户输入作为关键词
             return [user_query[:10]]
     
+    def _generate_creative_text(self, user_query: str, keywords: List[str]) -> str:
+        """
+        使用LLM根据用户查询和情绪关键词生成创意文案
+        
+        Args:
+            user_query: 用户原始查询
+            keywords: 情绪关键词列表
+            
+        Returns:
+            简短的创意文案（适合放在梗图上）
+        """
+        keywords_text = "、".join(keywords)
+        
+        system_prompt = f"""你是一个梗图文案创作专家。请根据用户的查询和提取的情绪关键词，生成一句简短、有趣、适合放在梗图上的文案。
+
+## 创作要求：
+1. **简短精炼**：最多8个字，最好4-6个字
+2. **符合情绪**：体现'{keywords_text}'的情绪
+3. **幽默风趣**：可以用网络流行语、谐音梗
+4. **口语化**：像朋友之间的对话
+5. **直接输出文案**：不要解释，不要加引号
+
+## 示例：
+用户查询："我今天太开心了"
+情绪：开心
+输出：开心到飞起
+
+用户查询："累死了不想上班"
+情绪：累
+输出：社畜本畜
+
+用户查询："无语了这也行"
+情绪：无语
+输出：离谱
+
+开始创作！"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"用户查询：{user_query}\n情绪关键词：{keywords_text}"}
+        ]
+        
+        try:
+            logger.info(f"🎨 生成创意文案: query='{user_query}', keywords={keywords}")
+            response = self.client.chat.completions.create(
+                model=self.config.model,
+                messages=messages,
+                temperature=0.8,  # 提高温度以增加创意性
+                max_tokens=20
+            )
+            
+            creative_text = response.choices[0].message.content.strip()
+            # 移除可能的引号
+            creative_text = creative_text.strip('"').strip("'").strip()
+            
+            logger.info(f"✨ LLM生成文案: '{creative_text}'")
+            return creative_text
+            
+        except Exception as e:
+            logger.error(f"❌ 创意文案生成失败: {e}")
+            # 降级：使用情绪关键词
+            return keywords[0] if keywords else "这就是生活"
+    
     def _get_system_prompt(self) -> str:
         """
         获取系统 prompt

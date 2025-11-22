@@ -99,10 +99,22 @@
                   {{ message.meme.explanation }}
                 </div>
                 
-                <!-- 来源标识 -->
+                <!-- 来源标识和操作按钮 -->
                 <div class="meme-source">
-                  <span class="source-badge">{{ message.meme.source === 'search' ? '📚 检索' : '✨ 生成' }}</span>
-                  <span v-if="message.meme.count > 1" class="count-badge">共 {{ message.meme.count }} 张</span>
+                  <div class="source-info">
+                    <span class="source-badge">{{ message.meme.source === 'search' ? '📚 检索' : '✨ 生成' }}</span>
+                    <span v-if="message.meme.count > 1" class="count-badge">共 {{ message.meme.count }} 张</span>
+                  </div>
+                  <!-- 创意生成按钮 -->
+                  <button 
+                    v-if="!message.generatingCreative"
+                    @click="generateCreative(message)"
+                    class="generate-btn"
+                    :disabled="message.generatingCreative"
+                  >
+                    🎨 创意生成
+                  </button>
+                  <span v-if="message.generatingCreative" class="generating-indicator">🎨 生成中...</span>
                 </div>
               </div>
 
@@ -166,7 +178,7 @@
 </template>
 
 <script>
-import { queryMemeStream, clearSession } from './api/memeApi'
+import { queryMemeStream, generateCreativeMeme, clearSession } from './api/memeApi'
 
 export default {
   name: 'App',
@@ -238,6 +250,7 @@ export default {
       
       this.loading = true
       this.currentReasoning = []
+      let extractedKeywords = []  // 保存提取的关键词
       
       // 滚动到底部
       this.$nextTick(() => {
@@ -251,6 +264,11 @@ export default {
         },
         onToolCall: (data) => {
           console.log('工具调用:', data)
+          
+          // 提取情绪关键词（步骤1）
+          if (data.step === 1 && data.result && data.result.keywords) {
+            extractedKeywords = data.result.keywords
+          }
           
           // 只保留最终结果（status为success/failed/low_score），过滤掉running状态
           if (data.status !== 'running') {
@@ -283,6 +301,8 @@ export default {
                 source: data.source,
                 count: data.count || 1
               }
+              lastMessage.query = query  // 记录原始查询
+              lastMessage.keywords = extractedKeywords  // 记录情绪关键词
               lastMessage.timestamp = Date.now()
             } else {
               // 降级：如果找不到消息，创建新的
@@ -295,6 +315,8 @@ export default {
                   source: data.source,
                   count: data.count || 1
                 },
+                query: query,  // 记录原始查询
+                keywords: extractedKeywords,  // 记录情绪关键词
                 timestamp: Date.now()
               })
             }
@@ -392,6 +414,57 @@ export default {
     handleImageError(event) {
       console.error('图片加载失败:', event.target.src)
       event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23ddd" width="400" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3E图片加载失败%3C/text%3E%3C/svg%3E'
+    },
+    
+    async generateCreative(message) {
+      if (!message.query || !message.keywords || message.keywords.length === 0) {
+        console.error('缺少查询或关键词信息')
+        return
+      }
+      
+      // 设置生成中状态
+      message.generatingCreative = true
+      this.$forceUpdate()  // 强制更新以显示加载状态
+      
+      try {
+        console.log('🎨 创意生成:', {query: message.query, keywords: message.keywords})
+        
+        const result = await generateCreativeMeme(message.query, message.keywords)
+        
+        if (result.success) {
+          // 添加新的助手消息显示生成的创意梗图
+          this.messages.push({
+            type: 'assistant',
+            meme: {
+              paths: [result.meme_path],  // 生成的只有一张
+              explanation: result.explanation,
+              source: 'generated',
+              count: 1
+            },
+            query: message.query,
+            keywords: message.keywords,
+            timestamp: Date.now()
+          })
+          
+          // 保存到localStorage
+          localStorage.setItem('meme_messages', JSON.stringify(this.messages))
+          
+          // 滚动到底部
+          this.$nextTick(() => {
+            this.scrollToBottom()
+          })
+        } else {
+          console.error('创意生成失败:', result.error)
+          alert('创意生成失败: ' + (result.error || '未知错误'))
+        }
+      } catch (error) {
+        console.error('创意生成失败:', error)
+        alert('创意生成失败: ' + error.message)
+      } finally {
+        // 重置生成中状态
+        message.generatingCreative = false
+        this.$forceUpdate()
+      }
     }
   }
 }
@@ -733,7 +806,14 @@ export default {
 
 .meme-source {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.source-info {
+  display: flex;
   gap: 8px;
   align-items: center;
 }
@@ -755,6 +835,48 @@ export default {
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.generate-btn {
+  padding: 6px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.generate-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.generate-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.generate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.generating-indicator {
+  display: inline-block;
+  padding: 6px 16px;
+  background: #f3f4f6;
+  color: #6b7280;
+  border-radius: 20px;
+  font-size: 13px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 /* 错误消息 */

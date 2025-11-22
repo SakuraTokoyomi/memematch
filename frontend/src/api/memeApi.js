@@ -155,9 +155,26 @@ export async function clearSession(sessionId) {
   }
 }
 
+/**
+ * 创意生成 - 基于原始查询和情绪关键词生成创意梗图
+ */
+export async function generateCreativeMeme(query, keywords) {
+  try {
+    const response = await apiClient.post('/api/generate', {
+      query: query,
+      keywords: keywords
+    })
+    return response.data
+  } catch (error) {
+    console.error('创意生成失败:', error)
+    throw error
+  }
+}
+
 export default {
   queryMeme,
   queryMemeStream,
+  generateCreativeMeme,
   healthCheck,
   clearSession
 }
